@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tenfold",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+
+  // Static front-end (public/) is served by the same Worker.
+  "assets": { "directory": "./public" },
+
+  // One Durable Object per game room (holds the live game + WebSockets).
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+
+  "vars": {
+    // Swap for "claude-haiku-5-5" if you prefer faster/cheaper list generation.
+    "AI_MODEL": "claude-sonnet-5-5"
+    // Optional: route through Cloudflare AI Gateway for caching, logs and rate limits, e.g.
+    // "AI_BASE_URL": "https://gateway.ai.cloudflare.com/v1/<ACCOUNT_ID>/<GATEWAY>/anthropic"
+  },
+
+  "observability": { "enabled": true }
+}

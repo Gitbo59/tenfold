@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tenfold: the top-ten guessing game</title>
+  <meta name="description" content="Pick any topic, let AI build the top ten, then take turns guessing with friends. Lose a life for every miss.">
+  <meta name="theme-color" content="#0f1a66">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,500..800&family=Figtree:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <a class="brand" href="/" id="brand" aria-label="Tenfold home"><span class="brand-bulb">10</span><span class="brand-name">Tenfold</span></a>
+    <div class="topbar-right">
+      <span id="conn" class="conn" hidden role="status">Reconnecting…</span>
+      <button id="btn-leave" class="btn btn-quiet" type="button" hidden>Leave room</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Home -->
+    <section id="screen-home" class="screen home">
+      <div class="home-copy">
+        <h1 class="display">Ten answers.<br>Few lives.</h1>
+        <p class="lede">Pick any topic and the AI builds the top ten. Take turns guessing with friends. Every miss costs a life, and the answers lower down the list are worth the most.</p>
+
+        <form id="home-form" class="home-form" autocomplete="off">
+          <label class="field">
+            <span class="field-label">Your name</span>
+            <input id="name" maxlength="16" autocomplete="nickname" placeholder="What should we call you?" required>
+          </label>
+          <div class="home-actions">
+            <button id="btn-create" class="btn btn-primary" type="button">Create room</button>
+            <span class="or">or join a friend</span>
+            <div class="join">
+              <input id="code" maxlength="5" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="Room code" aria-label="Room code">
+              <button id="btn-join" class="btn" type="submit">Join room</button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="home-board" aria-hidden="true">
+        <p class="sample-title">Most populous countries</p>
+        <ol class="board board-sample" id="sample-board"></ol>
+      </div>
+    </section>
+
+    <!-- Connecting -->
+    <section id="screen-connecting" class="screen center" hidden>
+      <p class="lede">Joining the room…</p>
+    </section>
+
+    <!-- Lobby -->
+    <section id="screen-lobby" class="screen lobby" hidden>
+      <div class="lobby-left">
+        <div class="panel">
+          <h2 class="h2">Room code</h2>
+          <div class="code-row">
+            <div id="room-code" class="room-code" aria-label="Room code"></div>
+            <button id="btn-copy" class="btn" type="button">Copy invite link</button>
+          </div>
+          <p class="hint">Share the code or the link. Up to 8 players can join.</p>
+        </div>
+        <div class="panel">
+          <h2 class="h2">Players <span id="player-count" class="count"></span></h2>
+          <ul id="lobby-players" class="roster"></ul>
+        </div>
+      </div>
+
+      <div class="lobby-right">
+        <div class="panel settings">
+          <h2 class="h2">Match settings</h2>
+          <p id="settings-note" class="hint" hidden>Only the host can change these.</p>
+
+          <div class="setting">
+            <div class="setting-text">
+              <label class="setting-name" for="lives-val">Lives per player</label>
+              <span class="hint">Each wrong guess or timeout costs one.</span>
+            </div>
+            <div class="stepper">
+              <button id="lives-dec" class="step" type="button" aria-label="Fewer lives">−</button>
+              <output id="lives-val" class="step-val" aria-live="polite">3</output>
+              <button id="lives-inc" class="step" type="button" aria-label="More lives">+</button>
+            </div>
+          </div>
+
+          <div class="setting">
+            <div class="setting-text">
+              <label class="setting-name" for="timer-on">Time limit</label>
+              <span class="hint">Run out of time and you lose a life.</span>
+            </div>
+            <input id="timer-on" class="switch" type="checkbox" role="switch">
+          </div>
+
+          <div class="setting setting-range" id="range-row">
+            <div class="setting-text">
+              <label class="setting-name" for="timer-sec">Time per turn</label>
+            </div>
+            <div class="range-wrap">
+              <input id="timer-sec" type="range" min="5" max="120" step="5" value="20">
+              <output id="timer-val" class="range-val">20 seconds</output>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel topic" id="topic-panel">
+          <h2 class="h2">Topic</h2>
+          <label class="field">
+            <span class="field-label">What should the top ten be about?</span>
+            <input id="topic" maxlength="120" placeholder="e.g. Best-selling video game consoles of all time">
+          </label>
+          <div class="topic-tools">
+            <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>
+            <div id="topic-chips" class="chips"></div>
+          </div>
+          <button id="btn-start" class="btn btn-primary btn-big" type="button">Build the list and start</button>
+          <p id="wait-note" class="hint" hidden>Waiting for the host to pick a topic. It stays secret until the game starts.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Generating -->
+    <section id="screen-generating" class="screen center" hidden>
+      <ol class="loader" aria-hidden="true">
+        <li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li>
+      </ol>
+      <h2 class="h2">Building the top ten</h2>
+      <p id="gen-topic" class="lede"></p>
+    </section>
+
+    <!-- Game -->
+    <section id="screen-game" class="screen game" hidden>
+      <div class="game-head">
+        <h2 id="g-title" class="display game-title"></h2>
+        <p id="g-basis" class="basis"></p>
+      </div>
+
+      <div class="turnbar" id="turnbar">
+        <p id="turn-text" class="turn-text"></p>
+        <div class="clock" id="clock" role="timer" aria-label="Time left this turn"><div id="clock-fill" class="clock-fill"></div></div>
+        <p id="clock-num" class="clock-num"></p>
+      </div>
+
+      <div id="results" class="panel results" hidden>
+        <h2 id="res-title" class="display res-title"></h2>
+        <ol id="res-list" class="standings"></ol>
+        <div class="res-actions">
+          <button id="btn-rematch" class="btn btn-primary" type="button">Play again</button>
+          <p id="res-wait" class="hint" hidden>Waiting for the host to start another round.</p>
+        </div>
+      </div>
+
+      <div class="game-grid">
+        <div class="board-wrap" id="board-wrap">
+          <ol id="board" class="board" aria-label="The top ten"></ol>
+          <div id="wrong-wrap" class="wrong-wrap" hidden>
+            <h3 class="h3">Already tried</h3>
+            <ul id="wrong" class="chips chips-wrong"></ul>
+          </div>
+        </div>
+        <aside class="side">
+          <ul id="players" class="players" aria-label="Players"></ul>
+          <ol id="feed" class="feed" aria-live="polite" aria-label="Game feed"></ol>
+        </aside>
+      </div>
+
+      <form id="guess-form" class="guessbar" autocomplete="off">
+        <input id="guess" maxlength="80" placeholder="Type an answer" aria-label="Your guess" autocapitalize="words" spellcheck="false">
+        <button id="btn-guess" class="btn btn-primary" type="submit">Lock in</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
