@@ -7,17 +7,39 @@
   // Static front-end (public/) is served by the same Worker.
   "assets": { "directory": "./public" },
 
-  // One Durable Object per game room (holds the live game + WebSockets).
+  // Workers AI: free daily allowance on the Workers Free plan, no API key needed.
+  "ai": { "binding": "AI" },
+
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+    "bindings": [
+      // One Durable Object per game room (live game + WebSockets).
+      { "name": "ROOM", "class_name": "Room" },
+      // One global object: daily AI budget, per-connection limits, list cache, reports.
+      { "name": "QUOTA", "class_name": "Quota" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["Quota"] }
+  ],
 
   "vars": {
-    // Swap for "claude-haiku-5-5" if you prefer faster/cheaper list generation.
-    "AI_MODEL": "claude-sonnet-5-5"
-    // Optional: route through Cloudflare AI Gateway for caching, logs and rate limits, e.g.
-    // "AI_BASE_URL": "https://gateway.ai.cloudflare.com/v1/<ACCOUNT_ID>/<GATEWAY>/anthropic"
+    // Free by default. "anthropic" and "openai" (any OpenAI-compatible API) are optional and may cost money.
+    "AI_PROVIDER": "workers-ai",
+    // Needs JSON-mode support and must not require a paid plan. See README before changing.
+    "AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+
+    // ---- Cost protection -------------------------------------------------------------
+    // Workers AI gives 10,000 neurons/day free. One request here costs at most about 270
+    // neurons (1,200 output tokens max), so 30 requests/day stays under ~8,100 neurons.
+    "DAILY_GENERATION_CAP": 30,
+    // New AI lists one connection can request per day, and per room.
+    "IP_DAILY_GENERATIONS": 4,
+    "ROOM_GENERATIONS": 5,
+    // Rooms one connection can create per hour.
+    "IP_ROOMS_PER_HOUR": 10,
+    // Rooms with no activity for this long have their sockets closed (saves Durable Object time).
+    "IDLE_MINUTES": 15
   },
 
   "observability": { "enabled": true }

@@ -10,6 +10,8 @@ export interface Answer {
   aliases: string[];
   detail?: string;
   found?: Found;
+  /** How many players in this room flagged the answer. */
+  reports?: number;
 }
 
 export type Match =

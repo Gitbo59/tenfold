@@ -296,6 +296,48 @@ input:disabled { opacity: 0.6; }
 .toast { background: var(--chalk); color: var(--stage-deep); font-weight: 500; padding: 10px 16px; border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
 .toast.error { background: var(--bad); color: #2a0007; font-weight: 700; }
 
+/* ---------- difficulty, hints, source, reports ---------- */
+.segmented { display: inline-flex; background: var(--stage-deep); border-radius: 999px; padding: 3px; border: 2px solid var(--line); }
+.seg {
+  appearance: none; cursor: pointer; border: 0; background: transparent; color: var(--muted);
+  padding: 7px 18px; border-radius: 999px; font-weight: 700;
+}
+.seg[aria-checked="true"] { background: var(--bulb); color: var(--stage-deep); }
+.seg:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.classics { margin-top: 18px; }
+.classics .chip { border-style: dashed; }
+.chip[aria-pressed="true"] { border-color: var(--bulb); background: rgba(255, 191, 47, 0.16); }
+.budget-note { margin-top: 14px; }
+
+.source-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 10px; }
+.source-line { font-size: 0.92rem; color: #dfe3ff; max-width: 60ch; }
+.source-line a { color: var(--bulb); }
+.source-line .tentative { color: var(--muted); }
+
+.hint-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.hint-bar .btn[aria-pressed="true"] { background: rgba(255, 191, 47, 0.18); border-color: var(--bulb); }
+
+.plate-hint { font-size: 0.86rem; color: var(--bulb); margin-top: 2px; }
+.flag {
+  appearance: none; background: none; border: 0; padding: 0 0 0 8px; cursor: pointer;
+  color: inherit; opacity: 0.7; font-size: 0.78rem; text-decoration: underline;
+}
+.flag:hover:not(:disabled) { opacity: 1; }
+.flag:disabled { cursor: default; text-decoration: none; }
+.sub .reported { font-weight: 700; color: #b3261e; padding-left: 8px; }
+.plate.missed .sub .reported { color: #ff9aa6; }
+
+.chips-wrong .chip-x { cursor: pointer; font: inherit; font-size: 0.82rem; }
+.chips-wrong .chip-x:hover { border-color: var(--bad); }
+
+.modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: rgba(5, 9, 40, 0.78); }
+.modal-card { background: var(--panel); border-radius: 8px; padding: 22px; width: min(440px, 100%); display: grid; gap: 14px; border: 1px solid var(--line); }
+.report-options { display: grid; gap: 8px; }
+.report-options label { display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: var(--stage-deep); border-radius: 8px; cursor: pointer; }
+.report-options input { accent-color: var(--bulb); width: 18px; height: 18px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
 /* ---------- small screens ---------- */
 @media (max-width: 560px) {
   body { font-size: 16px; }

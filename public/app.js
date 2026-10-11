@@ -3,6 +3,7 @@
 
   // ------------------------------------------------------------------ helpers
   const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   const esc = (s) =>
     String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const hue = (name) => {
@@ -15,19 +16,25 @@
       ? crypto.randomUUID()
       : "p" + Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-  const TOPICS = [
+  const EASY_TOPICS = [
     "Most populous countries", "Best-selling video game consoles of all time", "Highest-grossing films ever",
-    "Tallest mountains in the world", "Most-streamed artists on Spotify", "Largest countries by area",
-    "Most-visited tourist attractions", "Premier League all-time top scorers", "Longest rivers in the world",
-    "Most spoken languages", "Largest cities in Europe", "Most successful Olympic nations",
-    "Bestselling book series", "Richest people in the world", "Tallest buildings in the world",
-    "Most-subscribed YouTube channels", "Largest lakes in the world", "Most-visited countries",
-    "Best-selling cars of all time", "Largest islands in the world", "Biggest tech companies by market value",
-    "Most valuable football clubs", "Longest-running TV shows", "Most Grand Slam titles in men's tennis",
-    "Largest companies by revenue", "Most popular boys' names in the UK", "Biggest dog breeds",
-    "Most-listened-to albums of all time", "Largest deserts in the world", "Highest waterfalls in the world",
+    "Most-streamed artists on Spotify", "Largest countries by area", "Most-visited tourist attractions",
+    "Premier League all-time top scorers", "Most spoken languages", "Largest cities in Europe",
+    "Bestselling book series", "Tallest buildings in the world", "Most-subscribed YouTube channels",
+    "Most-visited countries", "Best-selling cars of all time", "Biggest tech companies by market value",
+    "Most Grand Slam titles in men's tennis", "Most popular boys' names in the UK", "Biggest dog breeds",
+    "Longest rivers in the world", "Largest planets and moons in the Solar System",
   ];
-  const pick = (n) => [...TOPICS].sort(() => Math.random() - 0.5).slice(0, n);
+  const HARD_TOPICS = [
+    "Most Formula 1 race wins by driver", "Largest lakes in Canada", "Highest peaks in the Alps",
+    "Countries with the most time zones", "Most Olympic gold medals by a single athlete", "Longest bridges by main span",
+    "Largest cities in Brazil", "Most Oscar wins by film", "Most-capped players in men's international football",
+    "Largest national parks in the USA", "Deepest lakes in the world", "Most-translated authors in history",
+    "Highest-grossing anime films", "Largest islands in the Mediterranean", "Longest-reigning monarchs in history",
+    "Most prolific chess grandmasters by rating", "Largest airports by passenger traffic", "Tallest waterfalls in Europe",
+  ];
+  const pool = () => (state && state.config.difficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
+  const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
 
   // ------------------------------------------------------------------ state
   const pid = (() => {
@@ -47,8 +54,16 @@
   let joinSent = false;
   let lastTurnPid = null;
   let lastLogId = null;
-  const animated = new Set();
   let configTimer = null;
+  let selectedClassic = null;
+  let chipsFor = null;
+  let classicsKey = "";
+  let budgetAt = 0;
+  let showSource = localStorage.getItem("tf_source") === "1";
+  let reportCtx = null;
+  const animated = new Set();
+  const myReports = new Set();
+
   // Local edits shown immediately; the server's echo confirms them (or they expire).
   const pending = {};
   const pendingTimers = {};
@@ -73,7 +88,7 @@
     el.className = `toast ${kind}`;
     el.textContent = msg;
     $("#toasts").append(el);
-    setTimeout(() => el.remove(), kind === "error" ? 5000 : 3200);
+    setTimeout(() => el.remove(), kind === "error" ? 5500 : 3200);
   }
 
   const send = (obj) => {
@@ -84,12 +99,12 @@
 
   // ------------------------------------------------------------------ home
   function buildSample() {
-    const rows = [["India", 1], ["China", 2], ["United States", 3], ["Indonesia", 4]];
+    const rows = ["India", "China", "United States", "Indonesia"];
     let html = "";
     for (let i = 1; i <= 10; i++) {
-      const row = rows[i - 1];
-      html += row
-        ? `<li class="plate found" style="--d:${i - 1}"><span class="bulb">${i}</span><span class="plate-body"><span class="ans">${row[0]}</span></span><span class="pts"></span></li>`
+      const name = rows[i - 1];
+      html += name
+        ? `<li class="plate found" style="--d:${i - 1}"><span class="bulb">${i}</span><span class="plate-body"><span class="ans">${name}</span></span><span class="pts"></span></li>`
         : `<li class="plate hidden"><span class="bulb">${i}</span><span class="plate-body"></span><span class="pts"></span></li>`;
     }
     $("#sample-board").innerHTML = html;
@@ -153,10 +168,12 @@
       try { ws.close(1000, "leave"); } catch {}
     }
     ws = null; state = null; code = null; joinSent = false; lastTurnPid = null; lastLogId = null;
-    animated.clear();
+    selectedClassic = null; classicsKey = ""; chipsFor = null;
+    animated.clear(); myReports.clear();
     sessionStorage.removeItem("tf_room");
     history.replaceState(null, "", "/");
     $("#conn").hidden = true;
+    $("#report-modal").hidden = true;
     show("home");
     if (!silent) toast("You left the room.");
   }
@@ -178,11 +195,22 @@
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === "state") onState(m);
-      else if (m.t === "toast") toast(m.msg, m.kind);
+      else if (m.t === "toast") {
+        if (m.kind === "error") budgetAt = 0;
+        toast(m.msg, m.kind);
+      }
     };
-    sock.onclose = () => {
+    sock.onclose = (ev) => {
       if (sock !== ws || leaving) return;
       stopPing();
+      if (ev && ev.code === 4001) {
+        // The room went quiet, so the server released the connection. Don't reconnect on our own.
+        const c = code;
+        leaveRoom(true);
+        $("#code").value = c || "";
+        toast("You were disconnected after a quiet spell. Join again to carry on.", "error");
+        return;
+      }
       $("#conn").hidden = false;
       scheduleReconnect();
     };
@@ -231,13 +259,41 @@
     }
     if (me || s.phase !== "lobby") joinSent = false;
 
-    if (s.phase === "lobby") { show("lobby"); animated.clear(); lastLogId = null; renderLobby(s, me); }
+    if (s.phase === "lobby") { show("lobby"); animated.clear(); lastLogId = null; myReports.clear(); renderLobby(s, me); }
     else if (s.phase === "generating") { show("generating"); $("#gen-topic").textContent = s.topic; }
     else { show("game"); renderGame(s, me); }
   }
 
   function avatar(p) {
     return `<span class="avatar" style="--h:${hue(p.name)}">${esc(p.name.slice(0, 1).toUpperCase())}</span>`;
+  }
+
+  function renderChips() {
+    chipsFor = state ? state.config.difficulty : "easy";
+    $("#topic-chips").innerHTML = pick(4).map((t) => `<button class="chip" type="button">${esc(t)}</button>`).join("");
+  }
+
+  function renderClassics(list) {
+    const key = JSON.stringify(list || []);
+    if (key === classicsKey) return;
+    classicsKey = key;
+    $("#classics").innerHTML = (list || [])
+      .map((c) => `<button class="chip" type="button" data-id="${esc(c.id)}" data-title="${esc(c.title)}" aria-pressed="false">${esc(c.title)}</button>`)
+      .join("");
+    $("#classics-wrap").hidden = !(list && list.length);
+  }
+
+  async function refreshBudget() {
+    if (Date.now() - budgetAt < 20000) return;
+    budgetAt = Date.now();
+    try {
+      const res = await fetch("/api/budget");
+      const b = await res.json();
+      $("#budget-note").textContent =
+        b.remaining > 0
+          ? `Free AI lists left today: ${b.remaining} of ${b.cap}. Lists someone has already played, and the built-in lists, don't use any.`
+          : "Today's free AI allowance is used up. Built-in lists and lists that have been played before still work.";
+    } catch { /* leave the note as it was */ }
   }
 
   function renderLobby(s, me) {
@@ -251,14 +307,18 @@
       )
       .join("");
 
-    // Settings: keep the controls in sync without fighting the host's cursor.
+    // Settings: show local edits straight away and keep the controls in sync with the server.
     const c = s.config;
     const lives = effective("lives", c.lives);
     const timerEnabled = effective("timer", c.timerEnabled);
     const seconds = effective("seconds", c.turnSeconds);
+    const difficulty = effective("difficulty", c.difficulty);
+    const hints = effective("hints", c.hints);
+
     $("#lives-val").textContent = lives;
     $("#lives-dec").disabled = !isHost || lives <= 1;
     $("#lives-inc").disabled = !isHost || lives >= 10;
+
     const timerOn = $("#timer-on");
     timerOn.checked = timerEnabled;
     timerOn.disabled = !isHost;
@@ -267,14 +327,68 @@
     range.disabled = !isHost || !timerEnabled;
     $("#timer-val").textContent = `${seconds} seconds`;
     $("#range-row").dataset.off = String(!timerEnabled);
+
+    for (const b of $$(".seg")) {
+      b.setAttribute("aria-checked", String(b.dataset.diff === difficulty));
+      b.disabled = !isHost;
+    }
+    $("#hints-val").textContent = hints;
+    $("#hints-dec").disabled = !isHost || hints <= 0;
+    $("#hints-inc").disabled = !isHost || hints >= 5;
     $("#settings-note").hidden = isHost;
 
     // Topic: host only.
     $("#topic").disabled = !isHost;
     $("#topic").closest(".field").hidden = !isHost;
     $(".topic-tools").hidden = !isHost;
+    $("#classics-wrap").hidden = !isHost || !(s.classics && s.classics.length);
+    $("#budget-note").hidden = !isHost;
     $("#btn-start").hidden = !isHost;
     $("#wait-note").hidden = isHost;
+    if (chipsFor !== difficulty) {
+      // chips follow the selected difficulty
+      const prev = state.config.difficulty;
+      state.config.difficulty = difficulty;
+      renderChips();
+      state.config.difficulty = prev;
+      chipsFor = difficulty;
+    }
+    renderClassics(s.classics);
+    if (isHost) refreshBudget();
+  }
+
+  function renderSource(s, finished) {
+    const btn = $("#btn-source");
+    const line = $("#source-line");
+    const visible = !!s.source && (finished || showSource);
+    btn.hidden = finished || !s.source;
+    btn.textContent = showSource ? "Hide source" : "Show source";
+    btn.setAttribute("aria-expanded", String(visible));
+    line.hidden = !visible;
+    if (visible) {
+      const q = encodeURIComponent(`${s.topic} ${s.source}`);
+      const link = `<a href="https://duckduckgo.com/?q=${q}" target="_blank" rel="noopener noreferrer">Search to verify</a>`;
+      line.innerHTML = s.classic
+        ? `Source: ${esc(s.source)}. ${link}`
+        : `<span class="tentative">AI-suggested source, not verified:</span> ${esc(s.source)}. ${link}`;
+    }
+  }
+
+  function renderHints(s, me) {
+    const bar = $("#hint-bar");
+    const on = s.phase === "playing" && s.config.hints > 0 && me && !me.eliminated;
+    bar.hidden = !on;
+    if (!on) return;
+    const voted = s.hintVotes.includes(pid);
+    const btn = $("#btn-hint");
+    btn.disabled = s.hintsLeft <= 0;
+    btn.setAttribute("aria-pressed", String(voted));
+    const tally = `${s.hintVotes.length}/${s.hintVoters}`;
+    btn.textContent = s.hintsLeft <= 0 ? "No hints left" : voted ? `Voted for a hint (${tally})` : `Vote for a hint (${tally})`;
+    $("#hint-note").textContent =
+      s.hintsLeft > 0
+        ? `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left. One unlocks when everyone still playing votes.`
+        : "";
   }
 
   function renderGame(s, me) {
@@ -283,7 +397,9 @@
     const cur = s.players.find((p) => p.id === s.turnPid);
 
     $("#g-title").textContent = s.topic;
-    $("#g-basis").textContent = s.basis;
+    $("#g-basis").textContent = s.listDifficulty ? `${s.basis} (${s.listDifficulty} list)` : s.basis;
+    renderSource(s, finished);
+    renderHints(s, me);
 
     // Turn banner
     const turn = $("#turn-text");
@@ -310,15 +426,28 @@
         let cls = "plate " + (f ? "found" : revealed ? "missed" : "hidden");
         if (f && !animated.has(a.rank)) { animated.add(a.rank); cls += " just"; }
         const bonus = f && (f.speed || f.streak) ? [f.speed ? `quick +${f.speed}` : "", f.streak ? `streak +${f.streak}` : ""].filter(Boolean).join(", ") : "";
-        const sub = f
-          ? `Found by ${esc(by ? by.name : "someone")}${a.detail ? ` · ${esc(a.detail)}` : ""}`
-          : revealed ? `Missed${a.detail ? ` · ${esc(a.detail)}` : ""}` : "";
-        return `<li class="${cls}"><span class="bulb">${a.rank}</span><span class="plate-body">${revealed ? `<span class="ans">${esc(a.answer)}</span><span class="sub">${sub}</span>` : ""}</span><span class="pts">${f ? `+${f.points}${bonus ? `<small>${esc(bonus)}</small>` : ""}` : ""}</span></li>`;
+        let sub = "";
+        let hint = "";
+        if (revealed) {
+          const mine = myReports.has(`r${a.rank}`);
+          const flagged = a.reports ? `<span class="reported">Flagged x${a.reports}</span>` : "";
+          const flag = `<button type="button" class="flag" data-rank="${a.rank}" data-answer="${esc(a.answer)}"${mine ? " disabled" : ""}>${mine ? "Reported" : "Report"}</button>`;
+          const lead = f ? `Found by ${esc(by ? by.name : "someone")}` : "Missed";
+          sub = `<span class="sub">${lead}${a.detail ? `, ${esc(a.detail)}` : ""}${flagged}${flag}</span>`;
+        } else if (a.hint) {
+          hint = `<span class="plate-hint">Hint: ${esc(a.hint)}</span>`;
+        }
+        return `<li class="${cls}"><span class="bulb">${a.rank}</span><span class="plate-body">${revealed ? `<span class="ans">${esc(a.answer)}</span>${sub}` : hint}</span><span class="pts">${f ? `+${f.points}${bonus ? `<small>${esc(bonus)}</small>` : ""}` : ""}</span></li>`;
       })
       .join("");
 
     $("#wrong-wrap").hidden = !s.wrong.length;
-    $("#wrong").innerHTML = s.wrong.map((w) => `<li class="chip-x">${esc(w)}</li>`).join("");
+    $("#wrong").innerHTML = s.wrong
+      .map((w) => {
+        const mine = myReports.has(`a${w.toLowerCase()}`);
+        return `<li><button type="button" class="chip-x" data-guess="${esc(w)}"${mine ? " disabled" : ""} title="Tap to report a rejected guess">${esc(w)}</button></li>`;
+      })
+      .join("");
 
     // Players
     const hearts = (p) => {
@@ -406,6 +535,52 @@
   }
   setInterval(tick, 100);
 
+  // ------------------------------------------------------------------ reports
+  function openReport(ctx) {
+    reportCtx = ctx;
+    if (ctx.kind === "alias") {
+      $("#report-title").textContent = "Report a rejected guess";
+      $("#report-text").textContent = `You're saying “${ctx.guess}” should have counted as a correct answer.`;
+      $("#report-options").innerHTML = "";
+    } else {
+      $("#report-title").textContent = `Report #${ctx.rank} ${ctx.answer}`;
+      $("#report-text").textContent = "What's wrong with this answer?";
+      $("#report-options").innerHTML =
+        '<label><input type="radio" name="rkind" value="wrong" checked> This answer isn\'t correct</label>' +
+        '<label><input type="radio" name="rkind" value="rank"> It\'s in the wrong place in the ranking</label>';
+    }
+    $("#report-modal").hidden = false;
+    $("#report-send").focus();
+  }
+  function closeReport() {
+    $("#report-modal").hidden = true;
+    reportCtx = null;
+  }
+  $("#board").addEventListener("click", (e) => {
+    const b = e.target.closest(".flag");
+    if (b && !b.disabled) openReport({ kind: "rank", rank: Number(b.dataset.rank), answer: b.dataset.answer });
+  });
+  $("#wrong").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip-x");
+    if (b && !b.disabled) openReport({ kind: "alias", guess: b.dataset.guess });
+  });
+  $("#report-cancel").addEventListener("click", closeReport);
+  $("#report-modal").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeReport(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#report-modal").hidden) closeReport(); });
+  $("#report-send").addEventListener("click", () => {
+    if (!reportCtx) return;
+    if (reportCtx.kind === "alias") {
+      send({ t: "report", kind: "alias", guess: reportCtx.guess });
+      myReports.add(`a${reportCtx.guess.toLowerCase()}`);
+    } else {
+      const kind = ($('input[name="rkind"]:checked') || {}).value || "wrong";
+      send({ t: "report", kind, rank: reportCtx.rank });
+      myReports.add(`r${reportCtx.rank}`);
+    }
+    closeReport();
+    if (state) render();
+  });
+
   // ------------------------------------------------------------------ events
   $("#home-form").addEventListener("submit", (e) => { e.preventDefault(); $("#code").value.trim() ? joinRoom() : createRoom(); });
   $("#btn-create").addEventListener("click", createRoom);
@@ -417,17 +592,19 @@
   const pushConfig = (patch) => {
     if (state) send({ t: "config", ...patch });
   };
-  function stepLives(delta) {
+  function stepSetting(key, field, delta, min, max) {
     if (!state) return;
-    const base = "lives" in pending ? pending.lives : state.config.lives;
-    const next = Math.min(10, Math.max(1, base + delta));
+    const base = key in pending ? pending[key] : state.config[field];
+    const next = Math.min(max, Math.max(min, base + delta));
     if (next === base) return;
-    setPending("lives", next);
+    setPending(key, next);
     render();
-    pushConfig({ lives: next });
+    pushConfig({ [field]: next });
   }
-  $("#lives-dec").addEventListener("click", () => stepLives(-1));
-  $("#lives-inc").addEventListener("click", () => stepLives(1));
+  $("#lives-dec").addEventListener("click", () => stepSetting("lives", "lives", -1, 1, 10));
+  $("#lives-inc").addEventListener("click", () => stepSetting("lives", "lives", 1, 1, 10));
+  $("#hints-dec").addEventListener("click", () => stepSetting("hints", "hints", -1, 0, 5));
+  $("#hints-inc").addEventListener("click", () => stepSetting("hints", "hints", 1, 0, 5));
   $("#timer-on").addEventListener("change", (e) => {
     setPending("timer", e.target.checked);
     render();
@@ -440,18 +617,47 @@
     clearTimeout(configTimer);
     configTimer = setTimeout(() => pushConfig({ turnSeconds: value }), 150);
   });
-
-  function renderChips() {
-    $("#topic-chips").innerHTML = pick(4).map((t) => `<button class="chip" type="button">${esc(t)}</button>`).join("");
+  for (const b of $$(".seg")) {
+    b.addEventListener("click", () => {
+      if (b.disabled) return;
+      setPending("difficulty", b.dataset.diff);
+      render();
+      pushConfig({ difficulty: b.dataset.diff });
+    });
   }
+
   $("#topic-chips").addEventListener("click", (e) => {
     const b = e.target.closest(".chip");
-    if (b) { $("#topic").value = b.textContent; $("#topic").focus(); }
+    if (!b) return;
+    selectedClassic = null;
+    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    $("#topic").value = b.textContent;
+    $("#topic").focus();
   });
-  $("#btn-surprise").addEventListener("click", () => { $("#topic").value = pick(1)[0]; renderChips(); });
+  $("#classics").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip");
+    if (!b) return;
+    selectedClassic = b.dataset.id;
+    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", String(c === b));
+    $("#topic").value = b.dataset.title;
+  });
+  $("#topic").addEventListener("input", () => {
+    const chosen = selectedClassic && $(`#classics .chip[data-id="${selectedClassic}"]`);
+    if (!chosen || chosen.dataset.title !== $("#topic").value.trim()) {
+      selectedClassic = null;
+      for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    }
+  });
+  $("#btn-surprise").addEventListener("click", () => {
+    selectedClassic = null;
+    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    $("#topic").value = pick(1)[0];
+    renderChips();
+  });
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
-    if (topic.length < 3) { toast("Enter a topic first, or tap Surprise me.", "error"); return $("#topic").focus(); }
+    if (selectedClassic) return send({ t: "start", classic: selectedClassic });
+    if (topic.length < 3) { toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error"); return $("#topic").focus(); }
     send({ t: "start", topic });
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });
@@ -460,6 +666,13 @@
     const link = `${location.origin}/?room=${code}`;
     try { await navigator.clipboard.writeText(link); toast("Invite link copied."); }
     catch { toast(`Share this link: ${link}`); }
+  });
+
+  $("#btn-hint").addEventListener("click", () => send({ t: "hint" }));
+  $("#btn-source").addEventListener("click", () => {
+    showSource = !showSource;
+    localStorage.setItem("tf_source", showSource ? "1" : "0");
+    if (state) render();
   });
 
   $("#guess-form").addEventListener("submit", (e) => {

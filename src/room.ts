@@ -1,7 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
-import { AiError, generateTopTen } from "./ai";
+import { AiError, cacheKey, generateTopTen, type Difficulty, type TopTen } from "./ai";
+import { CLASSICS, getClassic } from "./classics";
 import { matchGuess, normalize, type Answer } from "./match";
 import type { Env } from "./types";
+import { num } from "./util";
 
 type Phase = "lobby" | "generating" | "playing" | "finished";
 
@@ -9,6 +11,8 @@ interface Config {
   lives: number;
   timerEnabled: boolean;
   turnSeconds: number;
+  difficulty: Difficulty;
+  hints: number;
 }
 
 interface Player {
@@ -32,6 +36,9 @@ interface Saved {
   config: Config;
   topic: string;
   basis: string;
+  source: string;
+  listKey: string;
+  listDifficulty: Difficulty | null;
   answers: Answer[];
   players: Player[];
   hostId: string | null;
@@ -39,6 +46,12 @@ interface Saved {
   turnStartedAt: number;
   wrong: string[];
   wrongKeys: string[];
+  hints: { rank: number; text: string }[];
+  hintVotes: string[];
+  hintsLeft: number;
+  reportsBy: Record<string, number>;
+  reported: string[];
+  playedKeys: string[];
   log: LogEntry[];
   logSeq: number;
   genCount: number;
@@ -46,7 +59,7 @@ interface Saved {
 }
 
 const MAX_PLAYERS = 8;
-const MAX_GENERATIONS = 10; // topic generations per room (protects your AI bill)
+const MAX_REPORTS_PER_PLAYER = 5;
 const AWAY_GRACE_MS = 20_000; // how long we wait for a disconnected player before skipping them
 const LOBBY_REMOVE_MS = 30_000;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
@@ -57,9 +70,12 @@ function defaultState(): Saved {
   return {
     initialized: false,
     phase: "lobby",
-    config: { lives: 3, timerEnabled: true, turnSeconds: 20 },
+    config: { lives: 3, timerEnabled: true, turnSeconds: 20, difficulty: "easy", hints: 3 },
     topic: "",
     basis: "",
+    source: "",
+    listKey: "",
+    listDifficulty: null,
     answers: [],
     players: [],
     hostId: null,
@@ -67,6 +83,12 @@ function defaultState(): Saved {
     turnStartedAt: 0,
     wrong: [],
     wrongKeys: [],
+    hints: [],
+    hintVotes: [],
+    hintsLeft: 0,
+    reportsBy: {},
+    reported: [],
+    playedKeys: [],
     log: [],
     logSeq: 0,
     genCount: 0,
@@ -83,21 +105,34 @@ function cleanText(v: unknown, max: number): string {
   return typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, max) : "";
 }
 
+/** A clue that narrows things down without giving the answer away. */
+export function makeHint(answer: string): string {
+  const chars = [...answer.trim()];
+  const words = answer.trim().split(/\s+/).length;
+  const letters = chars.filter((c) => /[\p{L}\p{N}]/u.test(c)).length;
+  const first = (chars[0] ?? "?").toUpperCase();
+  return words > 1 ? `${words} words, ${letters} letters, starts with ${first}` : `${letters} letters, starts with ${first}`;
+}
+
 export class Room extends DurableObject<Env> {
   private s: Saved = defaultState();
   private conns = new Map<WebSocket, string | null>();
+  private ips = new WeakMap<WebSocket, string>();
   private timer?: ReturnType<typeof setTimeout>;
   private turnToken = 0;
   private deadline: number | null = null;
   private lobbyTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private rate = new WeakMap<WebSocket, { t: number; n: number }>();
+  private lastAction = Date.now();
+  private idleArmed = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get<Saved>("state");
       if (saved) {
-        this.s = { ...defaultState(), ...saved };
+        const def = defaultState();
+        this.s = { ...def, ...saved, config: { ...def.config, ...saved.config } };
         // A generation can't survive an eviction, so drop back to the lobby.
         if (this.s.phase === "generating") this.s.phase = "lobby";
       }
@@ -126,6 +161,7 @@ export class Room extends DurableObject<Env> {
     const [client, server] = Object.values(pair);
     server.accept();
     this.conns.set(server, null);
+    this.ips.set(server, request.headers.get("x-ip-hash") ?? "unknown");
     server.addEventListener("message", (ev) => void this.onMessage(server, ev.data));
     server.addEventListener("close", () => this.onClose(server));
     server.addEventListener("error", () => this.onClose(server));
@@ -133,13 +169,53 @@ export class Room extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    if (this.conns.size === 0 && Date.now() - this.s.lastActive > ROOM_TTL_MS) {
+    this.idleArmed = false;
+    const now = Date.now();
+
+    // Free-plan guard: a room nobody has touched for a while stops holding its sockets open,
+    // because connected sockets keep the object awake and use up the daily duration allowance.
+    const idleMs = Math.max(0.05, num(this.env.IDLE_MINUTES, 15)) * 60_000;
+    if (this.conns.size > 0 && now - this.lastAction > idleMs) {
+      for (const ws of [...this.conns.keys()]) {
+        try {
+          ws.close(4001, "idle");
+        } catch {
+          /* already closed */
+        }
+        this.onClose(ws);
+      }
+    }
+    if (this.conns.size > 0) {
+      this.idleArmed = true;
+      await this.ctx.storage.setAlarm(now + this.idleCheckMs());
+      return;
+    }
+
+    if (now - this.s.lastActive > ROOM_TTL_MS) {
       this.clearTimer();
       await this.ctx.storage.deleteAll();
       this.s = defaultState();
       return;
     }
-    await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS / 6);
+    await this.ctx.storage.setAlarm(now + ROOM_TTL_MS / 6);
+  }
+
+  private idleCheckMs(): number {
+    return Math.max(1, num(this.env.IDLE_CHECK_SECONDS, 120)) * 1000;
+  }
+
+  private armIdleAlarm(): void {
+    if (this.idleArmed) return;
+    this.idleArmed = true;
+    void this.ctx.storage.setAlarm(Date.now() + this.idleCheckMs());
+  }
+
+  private touch(): void {
+    this.lastAction = Date.now();
+  }
+
+  private quota() {
+    return this.env.QUOTA.get(this.env.QUOTA.idFromName("global"));
   }
 
   // ---------------------------------------------------------------- messaging
@@ -194,6 +270,11 @@ export class Room extends DurableObject<Env> {
     return first?.id ?? stored?.id ?? null;
   }
 
+  /** Players who count towards a hint vote: still in the game and connected. */
+  private hintVoters(): string[] {
+    return this.s.players.filter((p) => !p.eliminated && this.isConnected(p.id)).map((p) => p.id);
+  }
+
   private snapshot() {
     const { s } = this;
     const finished = s.phase === "finished";
@@ -205,12 +286,19 @@ export class Room extends DurableObject<Env> {
       config: s.config,
       topic: s.topic,
       basis: s.basis,
+      source: s.source,
+      classic: s.listKey.startsWith("classic:"),
+      listDifficulty: s.listDifficulty,
+      classics: s.phase === "lobby" ? CLASSICS.map((c) => ({ id: c.id, title: c.title })) : undefined,
       hostId: this.hostId(),
       turnPid: cur?.id ?? null,
       deadline: this.deadline,
       turnMs: this.deadline ? this.deadline - s.turnStartedAt : 0,
       awayGrace: !!this.deadline && !s.config.timerEnabled,
       serverNow: Date.now(),
+      hintsLeft: s.hintsLeft,
+      hintVotes: s.hintVotes,
+      hintVoters: s.phase === "playing" ? this.hintVoters().length : 0,
       players: s.players.map((p) => ({
         id: p.id,
         name: p.name,
@@ -220,12 +308,15 @@ export class Room extends DurableObject<Env> {
         eliminated: p.eliminated,
         connected: this.isConnected(p.id),
       })),
-      // Unfound answers stay on the server until the game ends.
-      answers: s.answers.map((a, i) =>
-        a.found || finished
-          ? { rank: i + 1, answer: a.answer, detail: a.detail ?? "", found: a.found ?? null }
-          : { rank: i + 1 },
-      ),
+      // Unfound answers stay on the server until the game ends. Only a hint's clue goes out.
+      answers: s.answers.map((a, i) => {
+        const rank = i + 1;
+        if (a.found || finished) {
+          return { rank, answer: a.answer, detail: a.detail ?? "", found: a.found ?? null, reports: a.reports ?? 0 };
+        }
+        const hint = s.hints.find((h) => h.rank === rank);
+        return hint ? { rank, hint: hint.text } : { rank };
+      }),
       wrong: s.wrong,
       log: s.log,
       winners: finished && maxScore > 0 ? s.players.filter((p) => p.score === maxScore).map((p) => p.id) : [],
@@ -253,13 +344,14 @@ export class Room extends DurableObject<Env> {
       return;
     }
     if (!msg || typeof msg.t !== "string") return;
-    if (msg.t === "ping") return this.send(ws, { t: "pong" });
+    if (msg.t === "ping") return this.send(ws, { t: "pong" }); // keep-alives don't count as activity
     if (!this.rateOk(ws)) return;
     if (msg.t === "join") return this.onJoin(ws, msg);
 
     const pid = this.conns.get(ws);
     const me = pid ? this.s.players.find((p) => p.id === pid) : undefined;
     if (!me) return;
+    this.touch();
 
     switch (msg.t) {
       case "config":
@@ -268,6 +360,10 @@ export class Room extends DurableObject<Env> {
         return this.onStart(ws, me, msg);
       case "guess":
         return this.onGuess(ws, me, msg);
+      case "hint":
+        return this.onHintVote(ws, me);
+      case "report":
+        return this.onReport(ws, me, msg);
       case "rematch":
         return this.onRematch(me);
     }
@@ -276,6 +372,7 @@ export class Room extends DurableObject<Env> {
   private onJoin(ws: WebSocket, msg: any): void {
     const pid = typeof msg.pid === "string" && /^[A-Za-z0-9-]{8,48}$/.test(msg.pid) ? msg.pid : null;
     if (!pid) return;
+    this.touch();
     let player = this.s.players.find((p) => p.id === pid);
 
     if (!player) {
@@ -321,7 +418,9 @@ export class Room extends DurableObject<Env> {
       clearTimeout(pending);
       this.lobbyTimers.delete(pid);
     }
+    this.armIdleAlarm();
     this.ensureTimer();
+    this.checkHints();
     this.persist();
     this.broadcast();
   }
@@ -333,49 +432,114 @@ export class Room extends DurableObject<Env> {
       lives: clampInt(msg.lives, 1, 10, c.lives),
       timerEnabled: typeof msg.timerEnabled === "boolean" ? msg.timerEnabled : c.timerEnabled,
       turnSeconds: clampInt(msg.turnSeconds, 5, 120, c.turnSeconds),
+      difficulty: msg.difficulty === "easy" || msg.difficulty === "hard" ? msg.difficulty : c.difficulty,
+      hints: clampInt(msg.hints, 0, 5, c.hints),
     };
     for (const p of this.s.players) p.lives = this.s.config.lives;
     this.persist();
     this.broadcast();
   }
 
+  // ---------------------------------------------------------------- starting a game
+
+  /** Gets a list from the cache or the AI, always through the free-allowance guards. */
+  private async getList(ws: WebSocket, topic: string, difficulty: Difficulty, key: string): Promise<TopTen> {
+    const q = this.quota();
+    // A room that already played this exact list gets a fresh one if the budget allows.
+    if (!this.s.playedKeys.includes(key)) {
+      const hit = await q.cacheGet(key);
+      if (hit) return hit;
+    }
+
+    const ip = this.ips.get(ws) ?? "unknown";
+    const roomCap = Math.max(0, Math.floor(num(this.env.ROOM_GENERATIONS, 5)));
+    try {
+      const list = await generateTopTen(this.env, topic, difficulty, {
+        reserve: async () => {
+          if (this.s.genCount >= roomCap) {
+            throw new AiError(
+              "This room has used all of its AI lists. Create a new room, or play a built-in list.",
+              "room cap",
+              { budget: true },
+            );
+          }
+          const r = await q.reserveGeneration(ip);
+          if (!r.ok) {
+            throw new AiError(
+              r.reason === "global"
+                ? "Today's free AI allowance is used up. Play a built-in list, or try again after midnight UTC."
+                : "You've reached today's limit of new AI lists from this connection. Play a built-in list, or try again tomorrow.",
+              `cap: ${r.reason}`,
+              { budget: true },
+            );
+          }
+          this.s.genCount++;
+        },
+        refund: async () => {
+          this.s.genCount = Math.max(0, this.s.genCount - 1);
+          await q.refundGeneration(ip);
+        },
+      });
+      await q.cachePut(key, list);
+      return list;
+    } catch (err) {
+      if (err instanceof AiError && err.opts.budget) {
+        const hit = await q.cacheGet(key);
+        if (hit) {
+          this.toastAll("The free AI allowance is used up, so you're replaying a saved list for this topic.");
+          return hit;
+        }
+      }
+      throw err;
+    }
+  }
+
   private async onStart(ws: WebSocket, me: Player, msg: any): Promise<void> {
     if (this.s.phase !== "lobby" || this.hostId() !== me.id) return;
+
+    const wantsClassic = typeof msg.classic === "string" && msg.classic.length > 0;
+    const classic = wantsClassic ? getClassic(msg.classic) : undefined;
+    if (wantsClassic && !classic) return this.toast(ws, "That built-in list doesn't exist.", "error");
     const topic = cleanText(msg.topic, 120);
-    if (topic.length < 3) return this.toast(ws, "Enter a topic first (at least 3 characters).", "error");
-    if (this.s.genCount >= MAX_GENERATIONS) {
-      return this.toast(ws, "This room has used all its topic generations. Create a new room to keep playing.", "error");
-    }
+    if (!classic && topic.length < 3) return this.toast(ws, "Enter a topic first (at least 3 characters).", "error");
 
     // Anyone who dropped out of the lobby doesn't get a seat.
     this.s.players = this.s.players.filter((p) => this.isConnected(p.id));
-    this.s.genCount++;
     this.s.phase = "generating";
-    this.s.topic = topic;
+    this.s.topic = classic ? classic.title : topic;
     this.persist();
     this.broadcast();
 
+    const difficulty = this.s.config.difficulty;
     try {
-      const result = await generateTopTen(this.env, topic);
-      if (this.s.phase !== "generating") return;
-      this.s.topic = result.title;
-      this.s.basis = result.basis;
-      this.s.answers = result.answers;
-      this.s.wrong = [];
-      this.s.wrongKeys = [];
-      this.s.log = [];
-      for (const p of this.s.players) {
-        p.lives = this.s.config.lives;
-        p.score = 0;
-        p.streak = 0;
-        p.eliminated = false;
+      let list: TopTen;
+      let key: string;
+      let listDifficulty: Difficulty | null;
+      if (classic) {
+        list = { title: classic.title, basis: classic.basis, source: classic.source, answers: classic.answers };
+        key = `classic:${classic.id}`;
+        listDifficulty = null;
+      } else {
+        key = cacheKey(topic, difficulty);
+        listDifficulty = difficulty;
+        list = await this.getList(ws, topic, difficulty, key);
       }
+      if (this.s.phase !== "generating") return;
+
+      this.s.topic = list.title;
+      this.s.basis = list.basis;
+      this.s.source = list.source ?? "";
+      this.s.listKey = key;
+      this.s.listDifficulty = listDifficulty;
+      this.s.answers = list.answers.map((x) => ({ answer: x.answer, aliases: [...x.aliases], ...(x.detail ? { detail: x.detail } : {}) }));
+      this.s.playedKeys = [...this.s.playedKeys.filter((k) => k !== key), key].slice(-30);
+      this.resetRound();
       this.s.turnIdx = Math.floor(Math.random() * this.s.players.length);
       this.s.phase = "playing";
       this.addLog("info", `${this.s.players[this.s.turnIdx].name} goes first.`);
       this.startTurn();
     } catch (err) {
-      console.error("generation failed", err);
+      console.error("generation failed:", err instanceof AiError ? `${err.message}` : err);
       this.s.phase = "lobby";
       this.s.topic = "";
       this.toastAll(err instanceof AiError ? err.userMessage : "Couldn't build that list. Try again.", "error");
@@ -383,6 +547,26 @@ export class Room extends DurableObject<Env> {
     this.persist();
     this.broadcast();
   }
+
+  /** Reset everything that belongs to a single round. */
+  private resetRound(): void {
+    this.s.wrong = [];
+    this.s.wrongKeys = [];
+    this.s.log = [];
+    this.s.hints = [];
+    this.s.hintVotes = [];
+    this.s.hintsLeft = this.s.config.hints;
+    this.s.reportsBy = {};
+    this.s.reported = [];
+    for (const p of this.s.players) {
+      p.lives = this.s.config.lives;
+      p.score = 0;
+      p.streak = 0;
+      p.eliminated = false;
+    }
+  }
+
+  // ---------------------------------------------------------------- guessing
 
   private onGuess(ws: WebSocket, me: Player, msg: any): void {
     if (this.s.phase !== "playing") return;
@@ -432,9 +616,106 @@ export class Room extends DurableObject<Env> {
       this.loseLife(me, `${me.name} guessed “${guess}”, which isn't on the list.`, "wrong");
       this.afterPenalty();
     }
+    this.checkHints();
     this.persist();
     this.broadcast();
   }
+
+  // ---------------------------------------------------------------- hints
+
+  private onHintVote(ws: WebSocket, me: Player): void {
+    if (this.s.phase !== "playing") return;
+    if (me.eliminated) return this.toast(ws, "Players who are out can't vote.");
+    if (this.s.hintsLeft <= 0) return this.toast(ws, "There are no hints left this round.");
+    const i = this.s.hintVotes.indexOf(me.id);
+    if (i >= 0) this.s.hintVotes.splice(i, 1);
+    else this.s.hintVotes.push(me.id);
+    this.checkHints();
+    this.persist();
+    this.broadcast();
+  }
+
+  /** Unlock a hint when every active, connected player has voted for one. */
+  private checkHints(): void {
+    if (this.s.phase !== "playing") return;
+    const voters = this.hintVoters();
+    this.s.hintVotes = this.s.hintVotes.filter((id) => voters.includes(id));
+    if (!voters.length || this.s.hintsLeft <= 0) return;
+    if (!voters.every((id) => this.s.hintVotes.includes(id))) return;
+
+    const idx = this.s.answers.findIndex((a, i) => !a.found && !this.s.hints.some((h) => h.rank === i + 1));
+    this.s.hintVotes = [];
+    if (idx < 0) return;
+    this.s.hints.push({ rank: idx + 1, text: makeHint(this.s.answers[idx].answer) });
+    this.s.hintsLeft--;
+    this.addLog("info", `Everyone voted for a hint. There's a clue for #${idx + 1} on the board.`);
+  }
+
+  // ---------------------------------------------------------------- reports
+
+  private async onReport(ws: WebSocket, me: Player, msg: any): Promise<void> {
+    if (this.s.phase !== "playing" && this.s.phase !== "finished") return;
+    const kind = msg.kind;
+    if (kind !== "wrong" && kind !== "rank" && kind !== "alias") return;
+    if ((this.s.reportsBy[me.id] ?? 0) >= MAX_REPORTS_PER_PLAYER) {
+      return this.toast(ws, "You've used all your reports for this round. Thanks for the feedback.");
+    }
+
+    let rank = 0;
+    let answer = "";
+    let dedupe: string;
+    if (kind === "alias") {
+      answer = cleanText(msg.guess, 80);
+      if (!answer || !this.s.wrong.includes(answer)) return;
+      dedupe = `${me.id}|alias|${normalize(answer)}`;
+    } else {
+      rank = clampInt(msg.rank, 1, 10, 0);
+      const a = this.s.answers[rank - 1];
+      if (!a || (!a.found && this.s.phase !== "finished")) return;
+      answer = a.answer;
+      dedupe = `${me.id}|${kind}|${rank}`;
+    }
+    if (this.s.reported.includes(dedupe)) return this.toast(ws, "You've already reported that one.");
+    this.s.reported.push(dedupe);
+    this.s.reportsBy[me.id] = (this.s.reportsBy[me.id] ?? 0) + 1;
+
+    if (kind !== "alias") {
+      const a = this.s.answers[rank - 1];
+      a.reports = (a.reports ?? 0) + 1;
+      this.addLog("info", `${me.name} flagged #${rank} ${answer} as ${kind === "wrong" ? "incorrect" : "ranked wrongly"}.`);
+    }
+
+    let evicted = false;
+    let saved = true;
+    try {
+      const res = await this.quota().report({
+        listKey: this.s.listKey,
+        topic: this.s.topic,
+        difficulty: this.s.listDifficulty,
+        kind,
+        rank,
+        answer,
+        ip: this.ips.get(ws) ?? "unknown",
+      });
+      saved = res.ok;
+      evicted = res.evicted;
+    } catch (err) {
+      console.error("report failed", err);
+      saved = false;
+    }
+    this.toast(
+      ws,
+      !saved
+        ? "Thanks. Your flag is shown to the room, but you've sent a lot of reports today so it wasn't saved."
+        : evicted
+          ? "Thanks. That list has been retired so nobody gets it again."
+          : "Thanks, your report has been saved.",
+    );
+    this.persist();
+    this.broadcast();
+  }
+
+  // ---------------------------------------------------------------- rematch, disconnects
 
   private onRematch(me: Player): void {
     if (this.s.phase !== "finished" || this.hostId() !== me.id) return;
@@ -443,17 +724,12 @@ export class Room extends DurableObject<Env> {
     this.s.phase = "lobby";
     this.s.topic = "";
     this.s.basis = "";
+    this.s.source = "";
+    this.s.listKey = "";
+    this.s.listDifficulty = null;
     this.s.answers = [];
-    this.s.wrong = [];
-    this.s.wrongKeys = [];
-    this.s.log = [];
     this.s.players = this.s.players.filter((p) => this.isConnected(p.id));
-    for (const p of this.s.players) {
-      p.lives = this.s.config.lives;
-      p.score = 0;
-      p.streak = 0;
-      p.eliminated = false;
-    }
+    this.resetRound();
     this.persist();
     this.broadcast();
   }
@@ -475,6 +751,7 @@ export class Room extends DurableObject<Env> {
       this.lobbyTimers.set(pid, t);
     } else {
       this.ensureTimer();
+      this.checkHints();
     }
     this.broadcast();
   }
@@ -546,6 +823,7 @@ export class Room extends DurableObject<Env> {
       this.loseLife(cur, `${cur.name} ran out of time.`, "timeout");
       this.afterPenalty();
     }
+    this.checkHints();
     this.persist();
     this.broadcast();
   }
@@ -579,6 +857,7 @@ export class Room extends DurableObject<Env> {
     this.clearTimer();
     this.deadline = null;
     this.s.phase = "finished";
+    this.s.hintVotes = [];
     for (const p of this.s.players) {
       if (!p.eliminated && p.lives > 0) {
         const bonus = p.lives * LIFE_BONUS;

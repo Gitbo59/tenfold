@@ -30,7 +30,7 @@
     <section id="screen-home" class="screen home">
       <div class="home-copy">
         <h1 class="display">Ten answers.<br>Few lives.</h1>
-        <p class="lede">Enter any top 10 list. Take turns guessing with friends. Every miss costs a life, answers higher on the list are worth the most.</p>
+        <p class="lede">Pick any topic and the AI builds the top ten. Take turns guessing with friends. Every miss costs a life, and the answers lower down the list are worth the most.</p>
 
         <form id="home-form" class="home-form" autocomplete="off">
           <label class="field">
@@ -110,6 +110,29 @@
               <output id="timer-val" class="range-val">20 seconds</output>
             </div>
           </div>
+
+          <div class="setting">
+            <div class="setting-text">
+              <span class="setting-name" id="diff-label">List difficulty</span>
+              <span class="hint">Easy lists use well-known answers. Hard lists make you think.</span>
+            </div>
+            <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
+              <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
+              <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
+            </div>
+          </div>
+
+          <div class="setting">
+            <div class="setting-text">
+              <label class="setting-name" for="hints-val">Hints per game</label>
+              <span class="hint">A hint unlocks when every player still in the game votes for one.</span>
+            </div>
+            <div class="stepper">
+              <button id="hints-dec" class="step" type="button" aria-label="Fewer hints">−</button>
+              <output id="hints-val" class="step-val" aria-live="polite">3</output>
+              <button id="hints-inc" class="step" type="button" aria-label="More hints">+</button>
+            </div>
+          </div>
         </div>
 
         <div class="panel topic" id="topic-panel">
@@ -122,6 +145,11 @@
             <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>
             <div id="topic-chips" class="chips"></div>
           </div>
+          <div id="classics-wrap" class="classics">
+            <h3 class="h3">Built-in lists (no AI needed)</h3>
+            <div id="classics" class="chips"></div>
+          </div>
+          <p id="budget-note" class="hint budget-note"></p>
           <button id="btn-start" class="btn btn-primary btn-big" type="button">Build the list and start</button>
           <p id="wait-note" class="hint" hidden>Waiting for the host to pick a topic. It stays secret until the game starts.</p>
         </div>
@@ -142,12 +170,21 @@
       <div class="game-head">
         <h2 id="g-title" class="display game-title"></h2>
         <p id="g-basis" class="basis"></p>
+        <div class="source-row">
+          <button id="btn-source" class="btn btn-small" type="button" aria-expanded="false" aria-controls="source-line">Show source</button>
+          <p id="source-line" class="source-line" hidden></p>
+        </div>
       </div>
 
       <div class="turnbar" id="turnbar">
         <p id="turn-text" class="turn-text"></p>
         <div class="clock" id="clock" role="timer" aria-label="Time left this turn"><div id="clock-fill" class="clock-fill"></div></div>
         <p id="clock-num" class="clock-num"></p>
+      </div>
+
+      <div id="hint-bar" class="hint-bar" hidden>
+        <button id="btn-hint" class="btn btn-small" type="button"></button>
+        <span id="hint-note" class="hint"></span>
       </div>
 
       <div id="results" class="panel results" hidden>
@@ -164,6 +201,7 @@
           <ol id="board" class="board" aria-label="The top ten"></ol>
           <div id="wrong-wrap" class="wrong-wrap" hidden>
             <h3 class="h3">Already tried</h3>
+            <p class="hint tried-note">Tap one if you think it should have counted.</p>
             <ul id="wrong" class="chips chips-wrong"></ul>
           </div>
         </div>
@@ -179,6 +217,18 @@
       </form>
     </section>
   </main>
+
+  <div id="report-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
+      <h2 id="report-title" class="h2">Report a problem</h2>
+      <p id="report-text" class="hint"></p>
+      <div id="report-options" class="report-options"></div>
+      <div class="modal-actions">
+        <button id="report-cancel" class="btn" type="button">Cancel</button>
+        <button id="report-send" class="btn btn-primary" type="button">Send report</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/app.js" defer></script>
