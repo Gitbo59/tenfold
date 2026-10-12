@@ -1,2 +1,16 @@
 # Copy to .dev.vars for local development (never commit .dev.vars)
-ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Daily challenge: required to enable sign-in. Generate with: openssl rand -hex 32
+AUTH_SECRET=replace-with-a-long-random-string
+
+# Add whichever providers you want (see README). For local dev the callback URL is
+# http://localhost:8787/api/auth/<provider>/callback
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# DISCORD_CLIENT_ID=
+# DISCORD_CLIENT_SECRET=
+
+# Optional: lets you use the /api/admin/* tools locally
+# ADMIN_TOKEN=

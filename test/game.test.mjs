@@ -47,6 +47,7 @@ B.send({ t: "start", topic: "bad topic" }); await sleep(150);
 ok(A.state.phase === "lobby", "non-host cannot start");
 A.send({ t: "start", topic: "bad topic" });
 for (let i = 0; i < 100 && !A.toasts.some((t) => t.kind === "error"); i++) await sleep(25);
+await A.until((s) => s.phase === "lobby");
 ok(A.state.phase === "lobby", "back in lobby after rejection");
 ok(A.toasts.some((t) => t.kind === "error" && /can't be used/.test(t.msg)), "rejected topic returns to lobby with error toast");
 A.send({ t: "start", topic: "NATO alphabet" });
@@ -65,7 +66,7 @@ ok(other(cur).toasts.some((t) => /not your turn/i.test(t.msg)), "guess out of tu
 cur.send({ t: "guess", text: "charlie" });
 await A.until((s) => s.answers[2].found);
 let f = A.state.answers[2].found;
-ok(f.points >= 3 + 2 && f.points <= 3 + 3, `hit on rank 3 scored ${f.points} (rank 3 + speed bonus)`);
+ok(f.points >= 8 + 2 && f.points <= 8 + 3, `hit on rank 3 scored ${f.points} (11 - 3 = 8, plus quick-fire bonus)`);
 ok(A.state.turnPid !== cur.pid, "turn passes after a correct guess");
 
 cur = byPid(A.state);

@@ -51,6 +51,7 @@ interface Saved {
   hintsLeft: number;
   reportsBy: Record<string, number>;
   reported: string[];
+  sourceViewed: string[];
   playedKeys: string[];
   log: LogEntry[];
   logSeq: number;
@@ -88,6 +89,7 @@ function defaultState(): Saved {
     hintsLeft: 0,
     reportsBy: {},
     reported: [],
+    sourceViewed: [],
     playedKeys: [],
     log: [],
     logSeq: 0,
@@ -364,6 +366,8 @@ export class Room extends DurableObject<Env> {
         return this.onHintVote(ws, me);
       case "report":
         return this.onReport(ws, me, msg);
+      case "source":
+        return this.onSourceViewed(me);
       case "rematch":
         return this.onRematch(me);
     }
@@ -558,6 +562,7 @@ export class Room extends DurableObject<Env> {
     this.s.hintsLeft = this.s.config.hints;
     this.s.reportsBy = {};
     this.s.reported = [];
+    this.s.sourceViewed = [];
     for (const p of this.s.players) {
       p.lives = this.s.config.lives;
       p.score = 0;
@@ -590,11 +595,12 @@ export class Room extends DurableObject<Env> {
         speed = Math.round((3 * Math.max(0, this.deadline - Date.now())) / total);
       }
       const streak = Math.min(me.streak, 3);
-      const points = rank + speed + streak;
+      const points = 11 - rank + speed + streak; // 1st place is worth 10, 10th place is worth 1
       a.found = { by: me.id, points, speed, streak };
       me.streak++;
       me.score += points;
-      this.addLog("correct", `${me.name} found #${rank} ${a.answer} (+${points}).`);
+      const note = m.exact ? "" : `, accepting “${guess}”`;
+      this.addLog("correct", `${me.name} found #${rank} ${a.answer} (+${points})${note}.`);
 
       if (this.s.answers.every((x) => x.found)) {
         me.score += FINISH_BONUS;
@@ -649,6 +655,17 @@ export class Room extends DurableObject<Env> {
     this.s.hints.push({ rank: idx + 1, text: makeHint(this.s.answers[idx].answer) });
     this.s.hintsLeft--;
     this.addLog("info", `Everyone voted for a hint. There's a clue for #${idx + 1} on the board.`);
+  }
+
+  // ---------------------------------------------------------------- source
+
+  /** Opening the source mid-round is announced once per player, so nobody quietly looks things up. */
+  private onSourceViewed(me: Player): void {
+    if (this.s.phase !== "playing" || !this.s.source || this.s.sourceViewed.includes(me.id)) return;
+    this.s.sourceViewed.push(me.id);
+    this.addLog("info", `${me.name} opened the source for this list.`);
+    this.persist();
+    this.broadcast();
   }
 
   // ---------------------------------------------------------------- reports

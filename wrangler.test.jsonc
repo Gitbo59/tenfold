@@ -12,17 +12,22 @@
       // One Durable Object per game room (live game + WebSockets).
       { "name": "ROOM", "class_name": "Room" },
       // One global object: daily AI budget, per-connection limits, list cache, reports.
-      { "name": "QUOTA", "class_name": "Quota" }
+      { "name": "QUOTA", "class_name": "Quota" },
+      // One global object: accounts, daily challenge lists, attempts, leaderboards.
+      { "name": "ARENA", "class_name": "Arena" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Room"] },
-    { "tag": "v2", "new_sqlite_classes": ["Quota"] }
+    { "tag": "v2", "new_sqlite_classes": ["Quota"] },
+    { "tag": "v3", "new_sqlite_classes": ["Arena"] }
   ],
 
   "vars": {
+    "AI_BASE_URL": "http://127.0.0.1:9999", "AI_API_KEY": "test-key", "ADMIN_TOKEN": "admintok", "REPORT_EVICT_AFTER": 1,
+    "AUTH_SECRET": "test-auth-secret-0123456789", "OAUTH_MOCK_BASE": "http://127.0.0.1:9998",
     // Free by default. "anthropic" and "openai" (any OpenAI-compatible API) are optional and may cost money.
-    "AI_PROVIDER": "openai", "AI_BASE_URL": "http://127.0.0.1:9999", "AI_API_KEY": "test-key", "ADMIN_TOKEN": "admintok", "REPORT_EVICT_AFTER": 1,
+    "AI_PROVIDER": "openai",
     // Needs JSON-mode support and must not require a paid plan. See README before changing.
     "AI_MODEL": "mock-model",
 
@@ -36,7 +41,11 @@
     // Rooms one connection can create per hour.
     "IP_ROOMS_PER_HOUR": 25,
     // Rooms with no activity for this long have their sockets closed (saves Durable Object time).
-    "IDLE_MINUTES": 15
+    "IDLE_MINUTES": 15,
+
+    // ---- Daily challenge (secrets such as AUTH_SECRET and the OAuth client secrets are NOT set here) ----
+    "DAILY_TURN_SECONDS": 4,
+    "DAILY_DIFFICULTY": "easy"
   },
 
   "observability": { "enabled": true }

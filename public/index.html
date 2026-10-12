@@ -30,7 +30,7 @@
     <section id="screen-home" class="screen home">
       <div class="home-copy">
         <h1 class="display">Ten answers.<br>Few lives.</h1>
-        <p class="lede">Pick any topic and the AI builds the top ten. Take turns guessing with friends. Every miss costs a life, and the answers lower down the list are worth the most.</p>
+        <p class="lede">Pick any topic and the AI builds the top ten. Take turns guessing with friends. Every miss costs a life, and the answers at the top of the list are worth the most.</p>
 
         <form id="home-form" class="home-form" autocomplete="off">
           <label class="field">
@@ -48,10 +48,97 @@
         </form>
       </div>
 
+      <div class="home-modes">
+        <div class="mode-card">
+          <h2 class="h2">Daily challenge</h2>
+          <p class="hint">Solo and ranked. One list a day, the same for everyone, scored on speed. Free to play with a sign-in.</p>
+          <a class="btn" id="btn-daily" href="#/daily">Play today's challenge</a>
+        </div>
+      </div>
+
       <div class="home-board" aria-hidden="true">
         <p class="sample-title">Most populous countries</p>
         <ol class="board board-sample" id="sample-board"></ol>
       </div>
+    </section>
+
+
+    <!-- Daily challenge (competitive, solo) -->
+    <section id="screen-daily" class="screen daily" hidden>
+      <a class="back-link" href="#/" id="daily-back">Back to Tenfold</a>
+      <div class="daily-head">
+        <h1 class="display daily-title">Daily challenge</h1>
+        <p class="lede">One list a day, the same for everyone. Solo, ranked and scored on speed. A new list starts at 00:00 UTC.</p>
+      </div>
+
+      <div id="daily-signin" class="panel" hidden>
+        <h2 class="h2">Sign in to play</h2>
+        <p class="hint">We use your Google, GitHub or Discord account only to show you're one person. We never see your email address or password, and we store only a scrambled ID plus the display name you choose.</p>
+        <div id="provider-buttons" class="providers"></div>
+        <p id="no-providers" class="hint" hidden>Sign-in isn't set up on this site yet.</p>
+      </div>
+
+      <form id="daily-name-form" class="panel" hidden>
+        <h2 class="h2">Choose a display name</h2>
+        <p class="hint">It appears on the leaderboard. Please don't use your real name or an email address.</p>
+        <label class="field">
+          <span class="field-label">Display name (3 to 16 characters)</span>
+          <input id="daily-name" maxlength="16" autocomplete="off" required>
+        </label>
+        <button class="btn btn-primary" type="submit">Save name</button>
+      </form>
+
+      <div id="daily-ready" class="panel" hidden>
+        <h2 class="h2">Today's challenge</h2>
+        <ul class="rules-list">
+          <li>You get <strong>one attempt</strong> a day and three lives.</li>
+          <li>Each answer has <strong id="rule-secs">30</strong> seconds. Run out and you lose a life, even if you close the tab.</li>
+          <li>The higher an answer sits in the list, the more it's worth (1st is worth 10, 10th is worth 1). Answering faster roughly doubles it.</li>
+          <li>We run automatic fair-play checks and may review top scores. <a href="/rules">Read the rules</a>.</li>
+        </ul>
+        <button id="daily-start" class="btn btn-primary btn-big" type="button">Start today's challenge</button>
+      </div>
+
+      <div id="daily-play" hidden>
+        <h2 id="daily-topic" class="display game-title"></h2>
+        <p id="daily-basis" class="basis"></p>
+        <div class="turnbar" id="daily-turnbar">
+          <p id="daily-turn" class="turn-text"></p>
+          <div class="clock" role="timer" aria-label="Time left for this answer"><div id="daily-fill" class="clock-fill"></div></div>
+          <p id="daily-secs" class="clock-num"></p>
+        </div>
+        <div id="daily-stats" class="daily-stats"></div>
+        <ol id="daily-list" class="board" aria-label="Today's top ten"></ol>
+      </div>
+
+      <div id="daily-result" class="panel results" hidden>
+        <h2 id="daily-result-title" class="display res-title"></h2>
+        <p id="daily-result-detail" class="lede"></p>
+        <p id="daily-result-note" class="hint"></p>
+        <p id="daily-source" class="hint source-line" hidden></p>
+        <button id="daily-report" class="btn btn-small" type="button">Report a problem with today's list</button>
+      </div>
+
+      <div id="daily-board" class="panel" hidden>
+        <div class="tabs" role="tablist" aria-label="Leaderboards">
+          <button class="tab" role="tab" data-tab="today" aria-selected="true">Today</button>
+          <button class="tab" role="tab" data-tab="month" aria-selected="false">This month</button>
+          <button class="tab" role="tab" data-tab="yesterday" aria-selected="false">Yesterday's answers</button>
+        </div>
+        <div id="lb-body" class="lb-body"></div>
+      </div>
+
+      <div id="daily-account" class="account-row" hidden>
+        <span>Signed in as <strong id="acct-name"></strong></span>
+        <button id="btn-signout" class="btn btn-quiet" type="button">Sign out</button>
+        <button id="btn-delete" class="btn btn-quiet" type="button">Delete my account</button>
+      </div>
+      <p class="legal-links"><a href="/rules">Rules, fair play and privacy</a></p>
+
+      <form id="daily-guess-form" class="guessbar" autocomplete="off" hidden>
+        <input id="daily-guess" maxlength="80" placeholder="Type an answer" aria-label="Your answer" autocapitalize="words" spellcheck="false">
+        <button id="daily-guess-btn" class="btn btn-primary" type="submit">Lock in</button>
+      </form>
     </section>
 
     <!-- Connecting -->
@@ -232,5 +319,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/app.js" defer></script>
+  <script src="/daily.js" defer></script>
 </body>
 </html>

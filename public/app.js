@@ -59,7 +59,7 @@
   let chipsFor = null;
   let classicsKey = "";
   let budgetAt = 0;
-  let showSource = localStorage.getItem("tf_source") === "1";
+  let showSource = false; // per game: opening it is announced to the room, so it is never remembered
   let reportCtx = null;
   const animated = new Set();
   const myReports = new Set();
@@ -77,10 +77,10 @@
     return key in pending ? pending[key] : serverVal;
   }
 
-  const screens = ["home", "connecting", "lobby", "generating", "game"];
+  const screens = ["home", "connecting", "lobby", "generating", "game", "daily"];
   function show(name) {
     for (const s of screens) $(`#screen-${s}`).hidden = s !== name;
-    $("#btn-leave").hidden = name === "home";
+    $("#btn-leave").hidden = name === "home" || name === "daily";
   }
 
   function toast(msg, kind = "info") {
@@ -259,6 +259,7 @@
     }
     if (me || s.phase !== "lobby") joinSent = false;
 
+    if (s.phase === "lobby" || s.phase === "generating") showSource = false;
     if (s.phase === "lobby") { show("lobby"); animated.clear(); lastLogId = null; myReports.clear(); renderLobby(s, me); }
     else if (s.phase === "generating") { show("generating"); $("#gen-topic").textContent = s.topic; }
     else { show("game"); renderGame(s, me); }
@@ -671,7 +672,7 @@
   $("#btn-hint").addEventListener("click", () => send({ t: "hint" }));
   $("#btn-source").addEventListener("click", () => {
     showSource = !showSource;
-    localStorage.setItem("tf_source", showSource ? "1" : "0");
+    if (showSource && state && state.phase === "playing") send({ t: "source" });
     if (state) render();
   });
 
@@ -685,13 +686,28 @@
   });
   $("#btn-rematch").addEventListener("click", () => send({ t: "rematch" }));
 
+  // ------------------------------------------------------------------ daily challenge hooks (see daily.js)
+  function openDaily() {
+    if (code) leaveRoom(true);
+    show("daily");
+    window.dispatchEvent(new Event("tf:daily"));
+  }
+  window.Tenfold = { $, $$, esc, show, toast, openDaily };
+  function route() {
+    if (location.hash.startsWith("#/daily")) openDaily();
+    else if (!code && !$("#screen-daily").hidden) show("home");
+  }
+  window.addEventListener("hashchange", route);
+
   // ------------------------------------------------------------------ boot
   buildSample();
   renderChips();
   $("#name").value = localStorage.getItem("tf_name") || "";
   const linked = new URLSearchParams(location.search).get("room");
   const saved = sessionStorage.getItem("tf_room");
-  if (saved && myName()) {
+  if (location.hash.startsWith("#/daily")) {
+    openDaily();
+  } else if (saved && myName()) {
     fetch(`/api/rooms/${saved}`).then((r) => (r.ok ? enterRoom(saved) : (sessionStorage.removeItem("tf_room"), show("home")))).catch(() => show("home"));
   } else {
     if (linked) $("#code").value = linked.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);

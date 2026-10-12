@@ -99,6 +99,25 @@ export class Quota extends DurableObject<Env> {
     this.add(`ip:${ip}:${day}`, day, -1);
   }
 
+  /**
+   * The daily challenge list is scheduled work, so it isn't blocked when players have used up the
+   * public allowance. It has its own small cap and still counts towards the daily total.
+   */
+  async reserveSystem(): Promise<{ ok: boolean }> {
+    const day = this.day();
+    this.sweep(day);
+    if (this.get(`sys:${day}`) >= 6) return { ok: false };
+    this.add(`sys:${day}`, day, 1);
+    this.add(`gen:${day}`, day, 1);
+    return { ok: true };
+  }
+
+  async refundSystem(): Promise<void> {
+    const day = this.day();
+    this.add(`sys:${day}`, day, -1);
+    this.add(`gen:${day}`, day, -1);
+  }
+
   async budget(): Promise<{ remaining: number; cap: number }> {
     const { daily } = this.caps();
     return { remaining: Math.max(0, daily - this.get(`gen:${this.day()}`)), cap: daily };

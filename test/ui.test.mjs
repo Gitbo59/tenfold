@@ -53,7 +53,11 @@ ok($("#g-basis").textContent.includes("Height above sea level") && !$("#g-basis"
 ok(!$("#btn-source").hidden && $("#source-line").hidden && $("#btn-source").textContent === "Show source", "source is hidden until asked for");
 click($("#btn-source"));
 ok(!$("#source-line").hidden && /^Source: Wikipedia/.test($("#source-line").textContent) && !/AI-suggested/.test($("#source-line").textContent) && $("#source-line a").href.includes("duckduckgo.com/?q="), "source shown with a verify link; built-in lists aren't labelled AI-suggested");
-ok($("#btn-source").getAttribute("aria-expanded") === "true" && w.localStorage.getItem("tf_source") === "1", "preference remembered");
+ok($("#btn-source").getAttribute("aria-expanded") === "true", "toggle reports expanded");
+ok(await until(() => $$("#feed li").some((l) => /Tester opened the source for this list/.test(l.textContent))), "opening the source shows up in the feed for everyone");
+click($("#btn-source")); click($("#btn-source"));
+await sleep(400);
+ok($$("#feed li").filter((l) => /opened the source/.test(l.textContent)).length === 1 && w.localStorage.getItem("tf_source") === null, "reopening doesn't repeat the announcement and nothing is remembered between games");
 
 console.log("hint voting");
 ok(!$("#hint-bar").hidden && /Vote for a hint \(0\/2\)/.test($("#btn-hint").textContent), "hint bar shows 0 of 2 votes");
@@ -107,6 +111,8 @@ $("#topic").value = "NATO alphabet"; $("#topic").dispatchEvent(new w.Event("inpu
 click($("#btn-start"));
 ok(await until(() => visible("#screen-game"), 8000), "AI list starts a game");
 ok(/\(hard list\)/.test($("#g-basis").textContent), "header labels it a hard list: " + $("#g-basis").textContent);
+ok($("#source-line").hidden, "the source starts hidden again in the next game");
+click($("#btn-source"));
 ok(/AI-suggested source, not verified/.test($("#source-line").textContent) && /Wikipedia: NATO phonetic alphabet/.test($("#source-line").textContent), "AI source is clearly labelled as unverified");
 
 click($("#btn-leave")); ok(visible("#screen-home"), "leave returns home");

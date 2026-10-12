@@ -64,6 +64,12 @@ B = new Client(code1, "Bob", B.pid); await B.ready; await A.until((s) => s.playe
 const mk = A.toasts.length; A.send({ t: "hint" });
 ok(!!(await A.toast(/no hints left/i, mk)), "voting with no hints left is refused");
 
+A.send({ t: "source" }); await A.until((s) => s.log.some((l) => /Alice opened the source/.test(l.text)));
+ok(true, "opening the source is announced in the feed");
+A.send({ t: "source" }); B.send({ t: "source" });
+await A.until((s) => s.log.some((l) => /Bob opened the source/.test(l.text)));
+ok(A.state.log.filter((l) => /Alice opened the source/.test(l.text)).length === 1, "the same player opening it again doesn't repeat the announcement");
+
 const who = () => (A.state.turnPid === A.pid ? A : B);
 const other = () => (who() === A ? B : A);
 who().send({ t: "guess", text: "charlie" });
@@ -140,6 +146,11 @@ ok(s4.c.state.classic && s4.c.state.listDifficulty === null && /Wikipedia/.test(
 s4.c.send({ t: "guess", text: "everest" }); await s4.c.until((s) => s.answers[0].found);
 s4.c.send({ t: "guess", text: "K2" }); await s4.c.until((s) => s.answers[1].found);
 ok(s4.c.state.answers[0].answer === "Mount Everest", "alias 'everest' and exact 'K2' both score");
+ok(s4.c.state.answers[0].found.points >= 10 && s4.c.state.answers[0].found.points <= 10 + 3, "rank 1 is worth the most: " + s4.c.state.answers[0].found.points + " points (10 + bonuses)");
+ok(s4.c.state.answers[1].found.points >= 9 && s4.c.state.answers[1].found.points <= 9 + 3 + 1, "rank 2 is worth 9 plus bonuses: " + s4.c.state.answers[1].found.points);
+s4.c.send({ t: "source" }); await s4.c.until((s) => s.log.some((l) => /Erin opened the source/.test(l.text)));
+s4.c.send({ t: "guess", text: "Parbat" }); await s4.c.until((s) => s.answers[8].found);
+ok(s4.c.state.log.some((l) => /accepting “Parbat”/.test(l.text)), "a partial name is accepted and the feed says what was typed");
 
 console.log("T4: failures are refunded; retries are counted");
 const s5 = await solo("Finn"); let b0 = await budget(); c0 = (await mock()).calls;
