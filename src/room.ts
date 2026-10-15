@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { AiError, cacheKey, generateTopTen, type Difficulty, type TopTen } from "./ai";
 import { CLASSICS, getClassic } from "./classics";
+import { assessGuess, cleanSignals } from "./anticheat";
 import { matchGuess, normalize, type Answer } from "./match";
 import type { Env } from "./types";
 import { num } from "./util";
@@ -30,6 +31,16 @@ interface LogEntry {
   text: string;
 }
 
+interface RankedInfo {
+  matchId: string;
+  listKey: string;
+  /** [a, b]. The order the rating service knows them in. */
+  players: { id: string; name: string; rating: number }[];
+  joinBy: number;
+  result?: { outcome: "a" | "b" | "draw" | "abort"; reason: string; aDelta: number; bDelta: number; aRating: number; bRating: number; pending?: boolean };
+  reported: boolean;
+}
+
 interface Saved {
   initialized: boolean;
   phase: Phase;
@@ -53,6 +64,8 @@ interface Saved {
   reported: string[];
   sourceViewed: string[];
   playedKeys: string[];
+  ranked: RankedInfo | null;
+  risk: Record<string, { w: number; flags: string[] }>;
   log: LogEntry[];
   logSeq: number;
   genCount: number;
@@ -91,6 +104,8 @@ function defaultState(): Saved {
     reported: [],
     sourceViewed: [],
     playedKeys: [],
+    ranked: null,
+    risk: {},
     log: [],
     logSeq: 0,
     genCount: 0,
@@ -127,6 +142,9 @@ export class Room extends DurableObject<Env> {
   private rate = new WeakMap<WebSocket, { t: number; n: number }>();
   private lastAction = Date.now();
   private idleArmed = false;
+  private accts = new WeakMap<WebSocket, { id: string; name: string }>();
+  private forfeitTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private joinTimer?: ReturnType<typeof setTimeout>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -156,6 +174,34 @@ export class Room extends DurableObject<Env> {
     if (!this.s.initialized) return new Response("Room not found", { status: 404 });
     if (url.pathname === "/status") return new Response("ok");
 
+    // Called by the matchmaker: turns this room into a ranked 1v1 for two specific accounts.
+    if (url.pathname === "/ranked-setup" && request.method === "POST") {
+      if (this.s.ranked) return new Response("exists", { status: 409 });
+      const body: any = await request.json().catch(() => null);
+      const pl = body?.players;
+      if (!body?.matchId || !Array.isArray(pl) || pl.length !== 2 || !Array.isArray(body?.list?.answers) || body.list.answers.length !== 10) return new Response("bad setup", { status: 400 });
+      this.s.config = { lives: 3, timerEnabled: true, turnSeconds: 20, difficulty: "easy", hints: 0 };
+      this.s.players = pl.map((p: any) => ({ id: String(p.id), name: String(p.name).slice(0, 16), lives: 3, score: 0, streak: 0, eliminated: false }));
+      this.s.hostId = this.s.players[0].id;
+      this.s.topic = String(body.list.title ?? "");
+      this.s.basis = String(body.list.basis ?? "");
+      this.s.source = String(body.list.source ?? "");
+      this.s.listKey = String(body.listKey ?? "");
+      this.s.listDifficulty = null;
+      this.s.answers = body.list.answers.map((x: any) => ({ answer: String(x.answer), aliases: (x.aliases ?? []).map(String), ...(x.detail ? { detail: String(x.detail) } : {}) }));
+      this.s.ranked = {
+        matchId: String(body.matchId),
+        listKey: this.s.listKey,
+        players: pl.map((p: any) => ({ id: String(p.id), name: String(p.name).slice(0, 16), rating: Number(p.rating) || 0 })),
+        joinBy: Date.now() + Math.max(1, num(this.env.RANKED_JOIN_SECONDS, 45)) * 1000,
+        reported: false,
+      };
+      this.s.phase = "lobby";
+      this.persist();
+      this.joinTimer = setTimeout(() => this.checkJoinDeadline(), Math.max(1, num(this.env.RANKED_JOIN_SECONDS, 45)) * 1000 + 250);
+      return new Response("ok");
+    }
+
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected a WebSocket upgrade", { status: 426 });
     }
@@ -164,6 +210,8 @@ export class Room extends DurableObject<Env> {
     server.accept();
     this.conns.set(server, null);
     this.ips.set(server, request.headers.get("x-ip-hash") ?? "unknown");
+    const accountId = request.headers.get("x-account-id");
+    if (accountId) this.accts.set(server, { id: accountId, name: request.headers.get("x-account-name") ?? "" });
     server.addEventListener("message", (ev) => void this.onMessage(server, ev.data));
     server.addEventListener("close", () => this.onClose(server));
     server.addEventListener("error", () => this.onClose(server));
@@ -173,6 +221,8 @@ export class Room extends DurableObject<Env> {
   async alarm(): Promise<void> {
     this.idleArmed = false;
     const now = Date.now();
+    if (this.s.ranked?.result && !this.s.ranked.reported) await this.reportRanked();
+    this.checkJoinDeadline();
 
     // Free-plan guard: a room nobody has touched for a while stops holding its sockets open,
     // because connected sockets keep the object awake and use up the daily duration allowance.
@@ -288,11 +338,15 @@ export class Room extends DurableObject<Env> {
       config: s.config,
       topic: s.topic,
       basis: s.basis,
-      source: s.source,
+      // In a ranked match the source stays hidden until it's over (it would be a lookup).
+      source: s.ranked && !finished ? "" : s.source,
       classic: s.listKey.startsWith("classic:"),
       listDifficulty: s.listDifficulty,
       classics: s.phase === "lobby" ? CLASSICS.map((c) => ({ id: c.id, title: c.title })) : undefined,
-      hostId: this.hostId(),
+      hostId: s.ranked ? null : this.hostId(),
+      ranked: s.ranked
+        ? { waiting: s.phase === "lobby" && !s.ranked.result, players: s.ranked.players, result: s.ranked.result ?? null }
+        : null,
       turnPid: cur?.id ?? null,
       deadline: this.deadline,
       turnMs: this.deadline ? this.deadline - s.turnStartedAt : 0,
@@ -301,7 +355,8 @@ export class Room extends DurableObject<Env> {
       hintsLeft: s.hintsLeft,
       hintVotes: s.hintVotes,
       hintVoters: s.phase === "playing" ? this.hintVoters().length : 0,
-      players: s.players.map((p) => ({
+      players: s.players.map((p, i) => ({
+        rating: s.ranked ? s.ranked.players[i]?.rating : undefined,
         id: p.id,
         name: p.name,
         lives: p.lives,
@@ -354,8 +409,11 @@ export class Room extends DurableObject<Env> {
     const me = pid ? this.s.players.find((p) => p.id === pid) : undefined;
     if (!me) return;
     this.touch();
+    if (this.s.ranked && !["guess", "report", "resign"].includes(msg.t)) return;
 
     switch (msg.t) {
+      case "resign":
+        return this.forfeit(me.id, "resigned");
       case "config":
         return this.onConfig(me, msg);
       case "start":
@@ -374,6 +432,7 @@ export class Room extends DurableObject<Env> {
   }
 
   private onJoin(ws: WebSocket, msg: any): void {
+    if (this.s.ranked) return this.onRankedJoin(ws);
     const pid = typeof msg.pid === "string" && /^[A-Za-z0-9-]{8,48}$/.test(msg.pid) ? msg.pid : null;
     if (!pid) return;
     this.touch();
@@ -430,6 +489,7 @@ export class Room extends DurableObject<Env> {
   }
 
   private onConfig(me: Player, msg: any): void {
+    if (this.s.ranked) return;
     if (this.s.phase !== "lobby" || this.hostId() !== me.id) return;
     const c = this.s.config;
     this.s.config = {
@@ -499,6 +559,7 @@ export class Room extends DurableObject<Env> {
   }
 
   private async onStart(ws: WebSocket, me: Player, msg: any): Promise<void> {
+    if (this.s.ranked) return;
     if (this.s.phase !== "lobby" || this.hostId() !== me.id) return;
 
     const wantsClassic = typeof msg.classic === "string" && msg.classic.length > 0;
@@ -601,6 +662,7 @@ export class Room extends DurableObject<Env> {
       me.score += points;
       const note = m.exact ? "" : `, accepting “${guess}”`;
       this.addLog("correct", `${me.name} found #${rank} ${a.answer} (+${points})${note}.`);
+      this.noteSignals(me, msg, true, rank);
 
       if (this.s.answers.every((x) => x.found)) {
         me.score += FINISH_BONUS;
@@ -619,6 +681,7 @@ export class Room extends DurableObject<Env> {
         this.s.wrong.shift();
         this.s.wrongKeys.shift();
       }
+      this.noteSignals(me, msg, false, 0);
       this.loseLife(me, `${me.name} guessed “${guess}”, which isn't on the list.`, "wrong");
       this.afterPenalty();
     }
@@ -630,6 +693,7 @@ export class Room extends DurableObject<Env> {
   // ---------------------------------------------------------------- hints
 
   private onHintVote(ws: WebSocket, me: Player): void {
+    if (this.s.ranked) return;
     if (this.s.phase !== "playing") return;
     if (me.eliminated) return this.toast(ws, "Players who are out can't vote.");
     if (this.s.hintsLeft <= 0) return this.toast(ws, "There are no hints left this round.");
@@ -661,6 +725,7 @@ export class Room extends DurableObject<Env> {
 
   /** Opening the source mid-round is announced once per player, so nobody quietly looks things up. */
   private onSourceViewed(me: Player): void {
+    if (this.s.ranked) return;
     if (this.s.phase !== "playing" || !this.s.source || this.s.sourceViewed.includes(me.id)) return;
     this.s.sourceViewed.push(me.id);
     this.addLog("info", `${me.name} opened the source for this list.`);
@@ -735,6 +800,7 @@ export class Room extends DurableObject<Env> {
   // ---------------------------------------------------------------- rematch, disconnects
 
   private onRematch(me: Player): void {
+    if (this.s.ranked) return;
     if (this.s.phase !== "finished" || this.hostId() !== me.id) return;
     this.clearTimer();
     this.deadline = null;
@@ -755,6 +821,20 @@ export class Room extends DurableObject<Env> {
     const pid = this.conns.get(ws);
     this.conns.delete(ws);
     if (!pid || this.isConnected(pid)) return;
+
+    if (this.s.ranked) {
+      // A dropped connection gets a minute to come back before it counts as a forfeit.
+      if (this.s.phase === "playing" && !this.s.ranked.result) {
+        const t = setTimeout(() => {
+          this.forfeitTimers.delete(pid);
+          if (!this.isConnected(pid)) this.forfeit(pid, "disconnected");
+        }, Math.max(1, num(this.env.RANKED_FORFEIT_SECONDS, 60)) * 1000);
+        this.forfeitTimers.set(pid, t);
+      }
+      this.ensureTimer();
+      this.broadcast();
+      return;
+    }
 
     if (this.s.phase === "lobby") {
       const t = setTimeout(() => {
@@ -855,7 +935,18 @@ export class Room extends DurableObject<Env> {
 
   private afterPenalty(): void {
     if (this.s.players.every((p) => p.eliminated)) this.finish();
+    else if (this.rankedDecided()) this.finish();
     else this.advanceTurn();
+  }
+
+  /** In a ranked match, once one player is out and the other is already ahead, nothing can change the result. */
+  private rankedDecided(): boolean {
+    if (!this.s.ranked || this.s.players.length !== 2) return false;
+    const [a, b] = this.s.players;
+    if (a.eliminated === b.eliminated) return false;
+    const survivor = a.eliminated ? b : a;
+    const gone = a.eliminated ? a : b;
+    return survivor.score > gone.score;
   }
 
   private advanceTurn(): void {
@@ -882,5 +973,135 @@ export class Room extends DurableObject<Env> {
         this.addLog("bonus", `${p.name} kept ${p.lives} ${p.lives === 1 ? "life" : "lives"} (+${bonus}).`);
       }
     }
+    if (this.s.ranked && this.s.players.length === 2) {
+      const [a, b] = this.s.players;
+      this.endRanked(a.score > b.score ? "a" : b.score > a.score ? "b" : "draw", "completed");
+    }
+  }
+
+  // ---------------------------------------------------------------- ranked matches
+
+  private onRankedJoin(ws: WebSocket): void {
+    this.touch();
+    const r = this.s.ranked!;
+    const acc = this.accts.get(ws);
+    const p = acc ? this.s.players.find((pl) => pl.id === acc.id) : undefined;
+    if (!acc || !p) {
+      this.toast(ws, "This ranked match isn't yours.", "error");
+      this.conns.delete(ws);
+      try {
+        ws.close(4403, "not in this match");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    for (const [other, id] of this.conns) {
+      if (id === p.id && other !== ws) {
+        this.conns.delete(other);
+        try {
+          other.close(1000, "replaced");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    this.conns.set(ws, p.id);
+    this.send(ws, { t: "you", id: p.id });
+    const t = this.forfeitTimers.get(p.id);
+    if (t) {
+      clearTimeout(t);
+      this.forfeitTimers.delete(p.id);
+    }
+    this.armIdleAlarm();
+    if (!r.result) {
+      this.checkJoinDeadline();
+      if (this.s.phase === "lobby" && this.s.players.every((pl) => this.isConnected(pl.id))) this.startRanked();
+      else this.ensureTimer();
+    }
+    this.persist();
+    this.broadcast();
+  }
+
+  private startRanked(): void {
+    if (this.s.phase !== "lobby" || !this.s.ranked || this.s.ranked.result) return;
+    if (this.joinTimer) clearTimeout(this.joinTimer);
+    this.resetRound();
+    this.s.turnIdx = Math.floor(Math.random() * 2);
+    this.s.phase = "playing";
+    this.addLog("info", `Ranked match. ${this.s.players[this.s.turnIdx].name} goes first.`);
+    this.startTurn();
+  }
+
+  /** If the opponent never turned up, cancel the match without touching anyone's rating. */
+  private checkJoinDeadline(): void {
+    const r = this.s.ranked;
+    if (!r || r.result || this.s.phase !== "lobby") return;
+    if (Date.now() < r.joinBy) return;
+    if (this.s.players.every((p) => this.isConnected(p.id))) return;
+    this.endRanked("abort", "an opponent never connected");
+  }
+
+  private endRanked(outcome: "a" | "b" | "draw" | "abort", reason: string): void {
+    const r = this.s.ranked;
+    if (!r || r.result) return;
+    this.clearTimer();
+    this.deadline = null;
+    if (this.joinTimer) clearTimeout(this.joinTimer);
+    for (const t of this.forfeitTimers.values()) clearTimeout(t);
+    this.forfeitTimers.clear();
+    this.s.phase = "finished";
+    r.result = { outcome, reason, aDelta: 0, bDelta: 0, aRating: r.players[0].rating, bRating: r.players[1].rating, pending: true };
+    this.addLog("info", outcome === "abort" ? "Match cancelled: no rating change." : `Match over: ${reason}.`);
+    this.persist();
+    this.broadcast();
+    void this.reportRanked();
+  }
+
+  /** Tells the rating service how it ended. Retried later if that fails. */
+  private async reportRanked(): Promise<void> {
+    const r = this.s.ranked;
+    if (!r?.result || r.reported) return;
+    const [a, b] = r.players;
+    try {
+      const arena = this.env.ARENA.get(this.env.ARENA.idFromName("arena")) as unknown as { recordMatch(id: string, o: object): Promise<any> };
+      const res = await arena.recordMatch(r.matchId, {
+        winner: r.result.outcome,
+        reason: r.result.reason,
+        aRisk: this.s.risk[a.id]?.w ?? 0,
+        bRisk: this.s.risk[b.id]?.w ?? 0,
+        flags: { a: this.s.risk[a.id]?.flags ?? [], b: this.s.risk[b.id]?.flags ?? [] },
+      });
+      if (res?.ok) {
+        r.result = { ...r.result, aDelta: res.aDelta ?? 0, bDelta: res.bDelta ?? 0, aRating: res.aRating ?? a.rating, bRating: res.bRating ?? b.rating, pending: false };
+        r.reported = true;
+      }
+    } catch (err) {
+      console.error("ranked report failed:", err);
+    }
+    this.persist();
+    this.broadcast();
+    if (!r.reported) void this.ctx.storage.setAlarm(Date.now() + 30_000);
+  }
+
+  private forfeit(pid: string, reason: string): void {
+    const r = this.s.ranked;
+    if (!r || r.result || (this.s.phase !== "playing" && this.s.phase !== "lobby")) return;
+    const who = this.s.players.find((p) => p.id === pid);
+    if (!who) return;
+    this.addLog("info", `${who.name} ${reason === "resigned" ? "resigned" : "left the match"}.`);
+    this.endRanked(pid === r.players[0].id ? "b" : "a", reason);
+  }
+
+  /** Quiet fair-play signals for ranked answers. Stored for review, never shown to players. */
+  private noteSignals(me: Player, msg: any, correct: boolean, rank: number): void {
+    if (!this.s.ranked) return;
+    const guessLen = typeof msg.text === "string" ? msg.text.length : 0;
+    const elapsed = Math.max(0, Date.now() - this.s.turnStartedAt);
+    const a = assessGuess(cleanSignals(msg.sig, guessLen), { correct, rank, elapsedMs: elapsed });
+    const cur = this.s.risk[me.id] ?? { w: 0, flags: [] };
+    cur.w += a.weight;
+    for (const f of a.flags) if (!cur.flags.includes(f)) cur.flags.push(f);
+    this.s.risk[me.id] = cur;
   }
 }

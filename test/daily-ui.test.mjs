@@ -43,6 +43,8 @@ console.log("home screen offers both modes");
   const p = await page("", null);
   ok(p.$("#btn-daily").getAttribute("href") === "#/daily" && /Daily challenge/.test(p.$(".mode-card").textContent), "home has a Daily challenge card next to Create/Join room");
   ok(!p.$("#screen-home").hidden && p.$("#screen-daily").hidden, "the friends mode is still the front page");
+  ok(await p.until(() => /Nobody has finished yet/.test(p.$("#home-lb-body").textContent)), "the home page shows the daily leaderboard (empty on day one), without needing to sign in");
+  ok(p.$$(".htab").length === 2 && p.$(".htab[aria-selected=true]").dataset.homeTab === "today", "with Today and This month tabs");
   p.w.location.hash = "#/daily";
   ok(await p.until(() => !p.$("#screen-daily").hidden && p.$("#screen-home").hidden), "following the link opens the daily page");
   ok(p.$("#daily-back").getAttribute("href") === "#/" && (p.w.location.hash = "#/", await p.until(() => !p.$("#screen-home").hidden)), "Back returns to the home screen");
@@ -102,6 +104,18 @@ ok(await p.until(() => /1 day/.test(p.$("#lb-body").textContent)), "the monthly 
 await fetch(BASE + "/api/admin/daily", { method: "POST", headers: ADMIN, body: JSON.stringify({ date: new Date(Date.now() - 864e5).toISOString().slice(0, 10), list: { title: "Yesterday", basis: "b", source: "s", answers: Array.from({ length: 10 }, (_, i) => ({ answer: "Old " + (i + 1) })) } }) });
 p.click(p.$$(".tab")[2]);
 ok(await p.until(() => p.$$("#lb-body .reveal-list li").length === 10 && /Old 1/.test(p.$("#lb-body").textContent)), "the yesterday tab reveals the whole list");
+
+console.log("home page leaderboard");
+{
+  const h = await page("", null);
+  ok(await h.until(() => /UI Tester/.test(h.$("#home-lb-body").textContent) && h.$$("#home-lb-body tr").length >= 2), "a finished player appears on the HOME page's leaderboard, for signed-out visitors too");
+  ok(h.$$("#home-lb-body tbody tr").length <= 10, "the home board shows at most the top 10");
+  h.click(h.$(".htab[data-home-tab=month]"));
+  ok(await h.until(() => /1 day/.test(h.$("#home-lb-body").textContent) && h.$(".htab[aria-selected=true]").dataset.homeTab === "month"), "the home board can switch to the monthly table");
+  h.w.location.hash = "#/daily"; await h.until(() => !h.$("#screen-daily").hidden);
+  h.w.location.hash = "#/"; await h.until(() => !h.$("#screen-home").hidden);
+  ok(/UI Tester/.test(h.$("#home-lb-body").textContent), "it is still there after going to the daily page and back");
+}
 
 console.log("account");
 p.click(p.$("#btn-signout"));

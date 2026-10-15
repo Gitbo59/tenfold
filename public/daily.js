@@ -248,6 +248,29 @@
     });
   }
 
+  // ------------------------------------------------------------------ home page leaderboard
+  let homeTab = "today";
+  let homeAt = 0;
+  async function loadHomeBoard(force) {
+    if (!force && Date.now() - homeAt < 30000) return;
+    homeAt = Date.now();
+    const b = await api(`/api/daily/leaderboard?scope=${homeTab}`);
+    const body = $("#home-lb-body");
+    if (!b.rows) { body.innerHTML = '<p class="hint">Couldn\'t load the leaderboard just now.</p>'; return; }
+    const top = b.rows.slice(0, 10);
+    const me = b.me || b.rows.find((r) => r.me && r.rank > 10) || null;
+    body.innerHTML = tableHtml(top, me, homeTab === "month");
+  }
+  for (const t of $$(".htab")) {
+    t.addEventListener("click", () => {
+      homeTab = t.dataset.homeTab;
+      for (const o of $$(".htab")) o.setAttribute("aria-selected", String(o === t));
+      loadHomeBoard(true);
+    });
+  }
+  window.addEventListener("tf:home", () => loadHomeBoard());
+  if (!$("#screen-home").hidden) loadHomeBoard(true);
+
   // ------------------------------------------------------------------ account
   $("#daily-name-form").addEventListener("submit", async (e) => {
     e.preventDefault();

@@ -45,7 +45,16 @@
 
     // ---- Daily challenge (secrets such as AUTH_SECRET and the OAuth client secrets are NOT set here) ----
     "DAILY_TURN_SECONDS": 4,
-    "DAILY_DIFFICULTY": "easy"
+    "DAILY_DIFFICULTY": "easy",
+
+    // ---- Ranked 1v1 ----
+    // Seconds both players have to connect after being matched, and to reconnect before a forfeit.
+    "RANKED_JOIN_SECONDS": 4,
+    "RANKED_FORFEIT_SECONDS": 3,
+    // The acceptable rating gap starts at 100 and widens by this much each second spent waiting.
+    "RANKED_WIDEN_PER_SEC": 400,
+    // Games a player needs before they appear on the public ladder.
+    "RANKED_LADDER_MIN_GAMES": 1
   },
 
   "observability": { "enabled": true }

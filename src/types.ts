@@ -50,4 +50,14 @@ export interface Env {
   DAILY_TURN_SECONDS?: string | number;
   /** "easy" (default) or "hard" lists for the daily challenge. */
   DAILY_DIFFICULTY?: string;
+
+  // ---- Ranked 1v1 ----
+  /** How many seconds both players have to connect once matched (default 45). */
+  RANKED_JOIN_SECONDS?: string | number;
+  /** How long a disconnected player has to come back before forfeiting (default 60). */
+  RANKED_FORFEIT_SECONDS?: string | number;
+  /** How fast the acceptable rating gap widens while waiting, per second (default 15, starting from 100). */
+  RANKED_WIDEN_PER_SEC?: string | number;
+  /** Games needed before a player shows on the public ladder (default 3). */
+  RANKED_LADDER_MIN_GAMES?: string | number;
 }

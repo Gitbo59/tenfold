@@ -66,7 +66,7 @@ The site now has two modes. **Play with friends** is the room-based game describ
 - One list a day, the same for everyone, starting at 00:00 UTC. The list is built ahead of time (a scheduled job at 03:15 UTC makes sure the next three days exist) so you can review it before anyone plays.
 - Sign-in required, one attempt a day, three lives, 30 seconds per answer. The clock runs on the server and keeps running if you close the page.
 - Score = (11 minus rank) x (1 + time bonus) x 10, so the top answer is worth 100 to 200 points and the 10th is worth 10 to 20. Ties go to the lower total time.
-- Daily and monthly leaderboards, and a "Yesterday's answers" tab. Today's missed answers are never shown until the day ends, so nobody can pass them on.
+- Daily and monthly leaderboards (the top 10 also show on the home page for everyone, signed in or not), and a "Yesterday's answers" tab. Today's missed answers are never shown until the day ends, so nobody can pass them on.
 - Quiet fair-play checks (see below), a rules and privacy page at `/rules`, and a free-to-enter design (nothing you can buy affects a score).
 
 ### How accounts work (and what you don't store)
@@ -125,6 +125,36 @@ None of this stops someone who looks answers up and types them naturally. It mak
 
 Free-tier note: building the daily list is reserved separately (up to 6 AI requests a day, even if players have used up the public allowance), so the worst case is about 36 requests, roughly 9,700 neurons, still under the 10,000 daily free allowance.
 
+## Ranked 1v1
+
+A third mode, separate from the friends rooms and from the daily challenge. It has its own rating and ladder, and nothing in it affects the daily or monthly leaderboards.
+
+- **Queue:** sign in, press **Find a match**, and the matchmaker pairs you with someone waiting at a similar rating. It starts looking within 100 rating points and widens by 15 points a second the longer you wait (up to 1,500), so nobody waits forever for a perfect match. The same two accounts can't be paired more than twice in 24 hours, which stops two accounts trading wins.
+- **Rules are fixed:** 3 lives, 20 seconds an answer, no hints, one shared board, and the same scoring as friends rooms. Score more than your opponent to win. If they run out of lives while you're ahead, the match ends immediately. Source lookups are disabled until it's over.
+- **Rating:** Elo. Everyone starts at 1200, and after each match your rating moves by K x (result minus expected result). The expected result comes from the rating gap, so beating a higher-rated player earns much more than beating a lower-rated one, and losing to a weaker player costs more. K is 40 for your first 20 games and 20 after that, and ratings never go below 100. A draw (equal scores) counts as half a win. This is the classic Elo formula. chess.com uses Glicko, which tracks a separate "rating deviation" per player; that would be a possible later upgrade.
+- **Leaving:** resigning is a loss. A disconnect gets 60 seconds to reconnect (refreshing the page is fine) before it counts as a forfeit. If someone never connects at all, the match is cancelled and nobody's rating changes.
+- **Ladder:** top 50 by rating on the Ranked page and the top 5 on the home page. Players appear after 3 rated games, and a `?` marks a still-provisional rating (under 20 games).
+- **Security:** a ranked room only lets in the two matched accounts, identified by their login cookie, and shows names from their accounts, so nobody can claim to be someone else.
+- **Fair play:** answers carry the same quiet typing signals as the daily challenge (plus a small flag for any answer sent without them, which means someone is calling the API directly). They're stored with the match for you to review and never shown to players. Ratings still apply when a match is flagged; you void a match if you confirm cheating.
+- **Cost:** a match uses no AI requests. Lists come from the built-in lists, past daily lists, and a pool that the scheduled job tops up by 2 a day (to 60). To fill the pool faster, run the seed call below. It uses the same small reserve as the daily list.
+- **No bots:** matchmaking only works while two people are searching at once. On a quiet site many people will wait without a match, so announce "ranked hours" or run the friends mode alongside until you have more players.
+
+Owner tools for ranked (same `ADMIN_TOKEN` as above):
+
+```bash
+# recent matches: players, result, rating changes, fair-play risk and flags
+curl -H "Authorization: Bearer $TOKEN" "https://YOUR-SITE/api/admin/matches"
+# undo one match's rating changes (after confirming cheating). Use the id from the list above.
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d '{"id":"MATCH_ID"}' https://YOUR-SITE/api/admin/match/void
+# set a rating by hand (support cases)
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d '{"name":"SomeName","rating":1300}' https://YOUR-SITE/api/admin/rating
+# fill the ranked list pool now (up to 10 at a time) or add your own list
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d '{"count":6}' https://YOUR-SITE/api/admin/pool/seed
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d '{"list":{"title":"...","basis":"...","source":"...","answers":[{"answer":"...","aliases":[]}, ...10 in total]}}' https://YOUR-SITE/api/admin/pool
+```
+
+Free-tier note: while someone waits in the queue their page asks the server for an update every 1.5 seconds, about 40 requests a minute. Worker requests are free up to 100,000 a day, so that's roughly 2,500 waiting-minutes a day across everyone. Deleting an account removes its rating and match history. The privacy section of `/rules` covers this.
+
 ## Staying inside the free tier
 
 **The one rule: keep the account on the Workers Free plan.** On Free there is no billing at all. When a daily limit is reached, calls simply fail until 00:00 UTC. If you upgrade to Workers Paid, or use paid AI providers, things *can* cost money (Workers AI beyond the free 10,000 neurons/day is $0.011 per 1,000).
@@ -171,18 +201,19 @@ The caps above still apply, but they count requests, not money, so set a spend l
 npm test
 ```
 
-Starts a local copy of the app with a fake AI server (no login, no spend) and runs: game rules, the new features (hints, reports, difficulty, cache, budget caps), the daily challenge (sign-in handshake, scoring, the clock, fair-play holds, leaderboards, deletion), simulated-browser passes for both modes, the idle disconnect, answer matching, and the AI module (including the Workers AI response formats). The real Workers AI binding can't run offline, so it is covered by a stand-in; do one real round after deploying.
+Starts a local copy of the app with a fake AI server (no login, no spend) and runs: game rules, the new features (hints, reports, difficulty, cache, budget caps), the daily challenge (sign-in handshake, scoring, the clock, fair-play holds, leaderboards, deletion), ranked 1v1 (queue, rating-gap matching, upset vs expected rating changes, forfeits, no-shows, safeguards), the rating maths, simulated-browser passes for each mode, the idle disconnect, answer matching, and the AI module (including the Workers AI response formats). The real Workers AI binding can't run offline, so it is covered by a stand-in; do one real round after deploying.
 
 ## Project layout
 
 ```
-public/            Static front end (index.html, style.css, app.js, daily.js, rules.html)
+public/            Static front end (index.html, style.css, app.js, daily.js, ranked.js, rules.html)
 src/index.ts       Worker: routes, per-connection hashing, room-creation limit, admin
 src/room.ts        Durable Object per room: lobby, turns, timers, hints, reports, scoring
 src/quota.ts       Global Durable Object: AI budget, limits, list cache, report log
 src/arena.ts       Global Durable Object: accounts, daily list, timed attempts, leaderboards, review
 src/auth.ts        Sign in with Google/GitHub/Discord (OAuth + PKCE), cookies, hashed IDs
 src/anticheat.ts   The quiet fair-play rules
+src/elo.ts         Elo rating maths for ranked
 src/daily-topics.ts  The rotation of daily topics
 src/ai.ts          Workers AI / OpenAI-compatible / Anthropic calls, prompts, validation
 src/classics.ts    Built-in lists (no AI)

@@ -143,7 +143,8 @@ export async function startSignIn(request: Request, env: Env, p: Provider): Prom
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
-  const signed = await sign(env, { s: state, v: verifier, p: p.id, t: Date.now() });
+  const next = url.searchParams.get("next") === "ranked" ? "ranked" : "daily";
+  const signed = await sign(env, { s: state, v: verifier, p: p.id, t: Date.now(), n: next });
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -163,15 +164,16 @@ export async function finishSignIn(
   request: Request,
   env: Env,
   p: Provider,
-): Promise<{ ok: true; id: string } | { ok: false; response: Response }> {
+): Promise<{ ok: true; id: string; next: string } | { ok: false; response: Response }> {
   const url = new URL(request.url);
+  const saved = await verify<{ s: string; v: string; p: string; t: number; n?: string }>(env, parseCookies(request)[OAUTH_COOKIE]);
+  const next = saved?.n === "ranked" ? "ranked" : "daily";
   const back = (code: string) => ({
     ok: false as const,
-    response: redirect(`/?autherror=${code}#/daily`, [cookie(url, OAUTH_COOKIE, "", 0)]),
+    response: redirect(`/?autherror=${code}#/${next}`, [cookie(url, OAUTH_COOKIE, "", 0)]),
   });
 
   if (url.searchParams.get("error")) return back("denied");
-  const saved = await verify<{ s: string; v: string; p: string; t: number }>(env, parseCookies(request)[OAUTH_COOKIE]);
   if (!saved || saved.p !== p.id || saved.s !== url.searchParams.get("state") || Date.now() - saved.t > 10 * 60_000) return back("state");
   const code = url.searchParams.get("code");
   if (!code) return back("state");
@@ -195,12 +197,12 @@ export async function finishSignIn(
     const userRes = await fetch(p.userUrl, { headers: { authorization: `Bearer ${tokens.access_token}`, accept: "application/json", "user-agent": "tenfold" } });
     const sub = p.pickId(await userRes.json());
     if (!userRes.ok || !sub) return back("user");
-    return { ok: true, id: await accountId(env, p.id, sub) };
+    return { ok: true, id: await accountId(env, p.id, sub), next };
   } catch (err) {
     console.error("sign-in failed:", err);
     return back("network");
   }
 }
 
-export const finishRedirect = (url: URL, sessionToken: string): Response =>
-  redirect("/#/daily", [cookie(url, SESSION_COOKIE, sessionToken, 30 * 24 * 60 * 60), cookie(url, OAUTH_COOKIE, "", 0)]);
+export const finishRedirect = (url: URL, sessionToken: string, next = "daily"): Response =>
+  redirect(`/#/${next === "ranked" ? "ranked" : "daily"}`, [cookie(url, SESSION_COOKIE, sessionToken, 30 * 24 * 60 * 60), cookie(url, OAUTH_COOKIE, "", 0)]);

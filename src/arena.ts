@@ -1,10 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import { AiError, generateTopTen, type Difficulty, type TopTen } from "./ai";
 import { REVIEW_THRESHOLD, assessAttempt, assessGuess, cleanSignals } from "./anticheat";
-import { dailyTopic } from "./daily-topics";
+import { DAILY_TOPICS, dailyTopic } from "./daily-topics";
+import { CLASSICS, getClassic } from "./classics";
+import { START_RATING, PROVISIONAL_GAMES, ratingChange } from "./elo";
 import { matchGuess, normalize, type Answer } from "./match";
 import type { Env } from "./types";
-import { num } from "./util";
+import { makeCode, num } from "./util";
 
 const LIVES = 3;
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -61,7 +63,17 @@ const isoDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
  * Accounts, sessions, the daily challenge and its leaderboards. Accounts hold no email and no
  * password: only a one-way hash of the sign-in provider's ID, a display name and play results.
  */
+interface QueueEntry {
+  id: string;
+  name: string;
+  rating: number;
+  since: number;
+  lastPoll: number;
+}
+
 export class Arena extends DurableObject<Env> {
+  private queue = new Map<string, QueueEntry>();
+  private pairing = false;
   private generating = new Map<string, Promise<TopTen>>();
   private rate = new Map<string, { t: number; n: number }>();
 
@@ -77,6 +89,10 @@ export class Arena extends DurableObject<Env> {
     sql.exec("CREATE TABLE IF NOT EXISTS guesses (attempt_id INTEGER NOT NULL, n INTEGER NOT NULL, ts INTEGER NOT NULL, ms INTEGER NOT NULL, kind TEXT NOT NULL, rank INTEGER, text TEXT, sig TEXT, flags TEXT)");
     // Lets us enforce "one attempt a day" even if someone deletes their account mid-day. Cleared at midnight UTC.
     sql.exec("CREATE TABLE IF NOT EXISTS tombstones (date TEXT NOT NULL, account_id TEXT NOT NULL, PRIMARY KEY (date, account_id))");
+    sql.exec("CREATE TABLE IF NOT EXISTS ratings (account_id TEXT PRIMARY KEY, rating INTEGER NOT NULL, games INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0, peak INTEGER NOT NULL, recent TEXT NOT NULL DEFAULT '[]', updated INTEGER NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, code TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, list_key TEXT NOT NULL, status TEXT NOT NULL, a_before INTEGER, b_before INTEGER, a_delta INTEGER, b_delta INTEGER, outcome TEXT, reason TEXT, a_risk INTEGER NOT NULL DEFAULT 0, b_risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '{}')");
+    sql.exec("CREATE TABLE IF NOT EXISTS ranked_pool (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, payload TEXT NOT NULL, created INTEGER NOT NULL)");
+    sql.exec("CREATE INDEX IF NOT EXISTS matches_status ON matches (status, ts)");
     sql.exec("CREATE INDEX IF NOT EXISTS attempts_date ON attempts (date, state)");
     sql.exec("CREATE INDEX IF NOT EXISTS guesses_attempt ON guesses (attempt_id)");
   }
@@ -196,6 +212,9 @@ export class Arena extends DurableObject<Env> {
     this.q("DELETE FROM guesses WHERE attempt_id IN (SELECT id FROM attempts WHERE account_id = ?)", a.id);
     this.q("DELETE FROM attempts WHERE account_id = ?", a.id);
     this.q("DELETE FROM sessions WHERE account_id = ?", a.id);
+    this.queue.delete(a.id);
+    this.q("DELETE FROM ratings WHERE account_id = ?", a.id);
+    this.q("DELETE FROM matches WHERE a = ? OR b = ?", a.id, a.id);
     this.q("DELETE FROM accounts WHERE id = ?", a.id);
     return { ok: true };
   }
@@ -208,17 +227,22 @@ export class Arena extends DurableObject<Env> {
     return { topic: String(r[0].topic), difficulty: String(r[0].difficulty), list: JSON.parse(String(r[0].payload)), status: String(r[0].status) };
   }
 
+  /** Scheduled work (daily lists, the ranked pool) draws on its own small reserve of AI requests. */
+  private systemHooks() {
+    const quota = this.env.QUOTA.get(this.env.QUOTA.idFromName("global"));
+    return {
+      reserve: async () => {
+        const r = await quota.reserveSystem();
+        if (!r.ok) throw new AiError("Scheduled lists couldn't be built today.", "system cap", { budget: true });
+      },
+      refund: () => quota.refundSystem(),
+    };
+  }
+
   private async generate(date: string): Promise<TopTen> {
     const topic = dailyTopic(date);
     const difficulty: Difficulty = this.env.DAILY_DIFFICULTY === "hard" ? "hard" : "easy";
-    const quota = this.env.QUOTA.get(this.env.QUOTA.idFromName("global"));
-    const list = await generateTopTen(this.env, topic, difficulty, {
-      reserve: async () => {
-        const r = await quota.reserveSystem();
-        if (!r.ok) throw new AiError("The daily list couldn't be built today.", "system cap", { budget: true });
-      },
-      refund: () => quota.refundSystem(),
-    });
+    const list = await generateTopTen(this.env, topic, difficulty, this.systemHooks());
     this.q("INSERT OR IGNORE INTO daily_lists (date, topic, difficulty, payload, status, created) VALUES (?, ?, ?, ?, 'ok', ?)", date, topic, difficulty, JSON.stringify(list), Date.now());
     return list;
   }
@@ -246,6 +270,8 @@ export class Arena extends DurableObject<Env> {
     for (let i = 0; i < 3; i++) await this.ensureList(isoDay(start + i * 86_400_000));
     this.q("DELETE FROM sessions WHERE expires < ?", start);
     this.q("DELETE FROM tombstones WHERE date < ?", isoDay(start));
+    this.expireActive();
+    await this.topUpPool(2);
     this.q("DELETE FROM guesses WHERE ts < ?", start - 60 * 86_400_000);
   }
 
@@ -488,6 +514,299 @@ export class Arena extends DurableObject<Env> {
     };
   }
 
+
+  // ---------------------------------------------------------------- ranked 1v1: ratings, queue, matches
+
+  async identify(token: string | null): Promise<{ id: string; name: string | null } | null> {
+    const a = await this.account(token);
+    return a ? { id: a.id, name: a.name } : null;
+  }
+
+  private ratingRow(id: string) {
+    this.q("INSERT OR IGNORE INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, 0, 0, 0, 0, ?, '[]', ?)", id, START_RATING, START_RATING, Date.now());
+    const r = this.q("SELECT * FROM ratings WHERE account_id = ?", id)[0];
+    return { rating: Number(r.rating), games: Number(r.games), wins: Number(r.wins), losses: Number(r.losses), draws: Number(r.draws), peak: Number(r.peak), recent: JSON.parse(String(r.recent)) as string[] };
+  }
+
+  private expireActive(): void {
+    this.q("UPDATE matches SET status = 'aborted', reason = 'expired' WHERE status = 'active' AND ts < ?", Date.now() - 3 * 60 * 60 * 1000);
+  }
+
+  private activeMatch(id: string) {
+    this.expireActive();
+    const r = this.q("SELECT m.id, m.code, m.a, m.b, a.name AS an, b.name AS bn FROM matches m JOIN accounts a ON a.id = m.a JOIN accounts b ON b.id = m.b WHERE m.status = 'active' AND (m.a = ? OR m.b = ?) ORDER BY m.ts DESC LIMIT 1", id, id);
+    if (!r.length) return null;
+    const m = r[0];
+    const mineIsA = String(m.a) === id;
+    const oppId = mineIsA ? String(m.b) : String(m.a);
+    return { matchId: String(m.id), code: String(m.code), opponent: { name: String(mineIsA ? m.bn : m.an), rating: this.ratingRow(oppId).rating } };
+  }
+
+  private window(e: QueueEntry, now: number): number {
+    return Math.min(1500, 100 + Math.max(0, num(this.env.RANKED_WIDEN_PER_SEC, 15)) * ((now - e.since) / 1000));
+  }
+
+  private statusFor(id: string) {
+    const m = this.activeMatch(id);
+    if (m) return { status: "matched" as const, ...m };
+    const e = this.queue.get(id);
+    if (e) return { status: "waiting" as const, waitedMs: Date.now() - e.since, window: Math.round(this.window(e, Date.now())) };
+    return { status: "idle" as const };
+  }
+
+  async queueJoin(token: string | null): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    if (!acc.name) return fail(400, "Choose a display name first.");
+    if (acc.banned) return fail(403, "This account can't play.");
+    if (!this.activeMatch(acc.id)) {
+      const r = this.ratingRow(acc.id);
+      const now = Date.now();
+      this.queue.set(acc.id, { id: acc.id, name: acc.name, rating: r.rating, since: now, lastPoll: now });
+      await this.tryPair();
+    }
+    return { ok: true, ...this.statusFor(acc.id), rating: this.ratingRow(acc.id).rating };
+  }
+
+  async queueStatus(token: string | null): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    const e = this.queue.get(acc.id);
+    if (e) e.lastPoll = Date.now();
+    await this.tryPair();
+    return { ok: true, ...this.statusFor(acc.id) };
+  }
+
+  async queueLeave(token: string | null): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    this.queue.delete(acc.id);
+    return { ok: true, ...this.statusFor(acc.id) };
+  }
+
+  private playedRecently(a: string, b: string): boolean {
+    const n = Number(this.q("SELECT COUNT(*) AS n FROM matches WHERE status = 'done' AND ts > ? AND ((a = ? AND b = ?) OR (a = ? AND b = ?))", Date.now() - 24 * 3600_000, a, b, b, a)[0].n);
+    return n >= 2; // stops two accounts trading wins to pump a rating
+  }
+
+  private async tryPair(): Promise<void> {
+    if (this.pairing) return;
+    this.pairing = true;
+    try {
+      const now = Date.now();
+      for (const e of [...this.queue.values()]) if (now - e.lastPoll > 15_000 || now - e.since > 5 * 60_000) this.queue.delete(e.id);
+      const waiting = [...this.queue.values()].sort((x, y) => x.since - y.since);
+      const used = new Set<string>();
+      for (const a of waiting) {
+        if (used.has(a.id)) continue;
+        let best: QueueEntry | null = null;
+        for (const b of waiting) {
+          if (b.id === a.id || used.has(b.id)) continue;
+          const gap = Math.abs(a.rating - b.rating);
+          if (gap > Math.max(this.window(a, now), this.window(b, now))) continue;
+          if (this.playedRecently(a.id, b.id)) continue;
+          if (!best || gap < Math.abs(a.rating - best.rating)) best = b;
+        }
+        if (!best) continue;
+        used.add(a.id); used.add(best.id);
+        this.queue.delete(a.id); this.queue.delete(best.id);
+        await this.makeMatch(a, best);
+      }
+    } finally {
+      this.pairing = false;
+    }
+  }
+
+  private loadKey(key: string): TopTen | null {
+    if (key.startsWith("classic:")) {
+      const c = getClassic(key.slice(8));
+      return c ? { title: c.title, basis: c.basis, source: c.source, answers: c.answers } : null;
+    }
+    if (key.startsWith("daily:")) return this.listRow(key.slice(6))?.list ?? null;
+    if (key.startsWith("pool:")) {
+      const r = this.q("SELECT payload FROM ranked_pool WHERE id = ?", Number(key.slice(5)));
+      return r.length ? (JSON.parse(String(r[0].payload)) as TopTen) : null;
+    }
+    return null;
+  }
+
+  /** Lists for ranked come from the built-ins, past daily lists and a pool the scheduled job tops up. Never today's or later. */
+  private pickList(ids: string[]): { key: string; list: TopTen } {
+    const recent = new Set<string>();
+    for (const id of ids) for (const k of this.ratingRow(id).recent) recent.add(k);
+    const keys = [
+      ...CLASSICS.map((c) => `classic:${c.id}`),
+      ...this.q("SELECT date FROM daily_lists WHERE date < ? AND status = 'ok'", this.today()).map((r) => `daily:${r.date}`),
+      ...this.q("SELECT id FROM ranked_pool").map((r) => `pool:${r.id}`),
+    ];
+    const fresh = keys.filter((k) => !recent.has(k));
+    const choices = fresh.length ? fresh : keys;
+    for (let i = 0; i < 5; i++) {
+      const key = choices[Math.floor(Math.random() * choices.length)];
+      const list = this.loadKey(key);
+      if (list) return { key, list };
+    }
+    const c = CLASSICS[0];
+    return { key: `classic:${c.id}`, list: { title: c.title, basis: c.basis, source: c.source, answers: c.answers } };
+  }
+
+  private async makeMatch(x: QueueEntry, y: QueueEntry): Promise<void> {
+    const [a, b] = Math.random() < 0.5 ? [x, y] : [y, x];
+    const { key, list } = this.pickList([a.id, b.id]);
+    let room: DurableObjectStub | null = null;
+    let code = "";
+    for (let i = 0; i < 6 && !room; i++) {
+      code = makeCode();
+      const stub = this.env.ROOM.get(this.env.ROOM.idFromName(code));
+      const res = await stub.fetch("https://room/init");
+      if (res.status === 200) room = stub;
+    }
+    if (!room) return;
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (n) => n.toString(16).padStart(2, "0")).join("");
+    this.q("INSERT INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)", id, Date.now(), code, a.id, b.id, key, a.rating, b.rating);
+    const res = await room.fetch("https://room/ranked-setup", {
+      method: "POST",
+      body: JSON.stringify({ matchId: id, listKey: key, list, players: [{ id: a.id, name: a.name, rating: a.rating }, { id: b.id, name: b.name, rating: b.rating }] }),
+    });
+    if (!res.ok) this.q("UPDATE matches SET status = 'aborted', reason = 'setup failed' WHERE id = ?", id);
+  }
+
+  /** Called by the match room when a ranked game ends. Safe to call twice: the first result wins. */
+  async recordMatch(matchId: string, o: { winner: "a" | "b" | "draw" | "abort"; reason: string; aRisk?: number; bRisk?: number; flags?: unknown }): Promise<any> {
+    const rows = this.q("SELECT * FROM matches WHERE id = ?", matchId);
+    if (!rows.length) return fail(404, "unknown match");
+    const m = rows[0];
+    const done = (extra: object) => ({ ok: true, ...extra });
+    if (String(m.status) !== "active") {
+      return done({ already: true, outcome: m.outcome, aDelta: Number(m.a_delta ?? 0), bDelta: Number(m.b_delta ?? 0), aRating: Number(m.a_before ?? 0) + Number(m.a_delta ?? 0), bRating: Number(m.b_before ?? 0) + Number(m.b_delta ?? 0) });
+    }
+    if (o.winner === "abort") {
+      this.q("UPDATE matches SET status = 'aborted', outcome = 'abort', reason = ? WHERE id = ?", String(o.reason).slice(0, 80), matchId);
+      return done({ outcome: "abort", aDelta: 0, bDelta: 0 });
+    }
+    const a = String(m.a), b = String(m.b);
+    const ra = this.ratingRow(a), rb = this.ratingRow(b);
+    const scoreA = o.winner === "a" ? 1 : o.winner === "b" ? 0 : 0.5;
+    const { aDelta, bDelta } = ratingChange({ rating: ra.rating, games: ra.games }, { rating: rb.rating, games: rb.games }, scoreA);
+    const apply = (id: string, r: ReturnType<Arena["ratingRow"]>, delta: number, result: "w" | "l" | "d") => {
+      const rating = r.rating + delta;
+      const recent = [...r.recent, String(m.list_key)].slice(-10);
+      this.q(
+        "UPDATE ratings SET rating = ?, games = games + 1, wins = wins + ?, losses = losses + ?, draws = draws + ?, peak = MAX(peak, ?), recent = ?, updated = ? WHERE account_id = ?",
+        rating, result === "w" ? 1 : 0, result === "l" ? 1 : 0, result === "d" ? 1 : 0, rating, JSON.stringify(recent), Date.now(), id,
+      );
+    };
+    apply(a, ra, aDelta, scoreA === 1 ? "w" : scoreA === 0 ? "l" : "d");
+    apply(b, rb, bDelta, scoreA === 0 ? "w" : scoreA === 1 ? "l" : "d");
+    this.q(
+      "UPDATE matches SET status = 'done', a_before = ?, b_before = ?, a_delta = ?, b_delta = ?, outcome = ?, reason = ?, a_risk = ?, b_risk = ?, flags = ? WHERE id = ?",
+      ra.rating, rb.rating, aDelta, bDelta, o.winner, String(o.reason).slice(0, 80), Math.round(o.aRisk ?? 0), Math.round(o.bRisk ?? 0), JSON.stringify(o.flags ?? {}).slice(0, 600), matchId,
+    );
+    return done({ outcome: o.winner, aDelta, bDelta, aRating: ra.rating + aDelta, bRating: rb.rating + bDelta });
+  }
+
+  async rankedMe(token: string | null): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    const r = this.ratingRow(acc.id);
+    return { ok: true, name: acc.name, rating: r.rating, games: r.games, wins: r.wins, losses: r.losses, draws: r.draws, peak: r.peak, provisional: r.games < PROVISIONAL_GAMES, ...this.statusFor(acc.id) };
+  }
+
+  async rankedLadder(token: string | null, limit = 50): Promise<any> {
+    const me = await this.account(token);
+    const min = Math.max(1, Math.floor(num(this.env.RANKED_LADDER_MIN_GAMES, 3)));
+    const rows = this.q(
+      "SELECT acc.id AS id, acc.name AS name, r.rating AS rating, r.games AS games, r.wins AS wins, r.losses AS losses, r.draws AS draws FROM ratings r JOIN accounts acc ON acc.id = r.account_id WHERE r.games >= ? AND acc.banned = 0 AND acc.name IS NOT NULL ORDER BY r.rating DESC, r.games DESC, acc.name ASC LIMIT 200",
+      min,
+    ).map((r, i) => ({ rank: i + 1, name: String(r.name), rating: Number(r.rating), games: Number(r.games), wins: Number(r.wins), losses: Number(r.losses), draws: Number(r.draws), provisional: Number(r.games) < PROVISIONAL_GAMES, me: !!me && String(r.id) === me.id }));
+    const mine = rows.find((r) => r.me) ?? null;
+    return { ok: true, rows: rows.slice(0, limit), me: mine && mine.rank > limit ? mine : null, minGames: min };
+  }
+
+  // ---- the pool of lists used for ranked matches
+
+  private poolSize(): number {
+    return Number(this.q("SELECT COUNT(*) AS n FROM ranked_pool")[0].n);
+  }
+
+  private async addPoolList(): Promise<boolean> {
+    const topic = DAILY_TOPICS[(this.poolSize() * 7 + 3) % DAILY_TOPICS.length];
+    try {
+      const list = await generateTopTen(this.env, topic, "easy", this.systemHooks());
+      this.q("INSERT INTO ranked_pool (topic, payload, created) VALUES (?, ?, ?)", topic, JSON.stringify(list), Date.now());
+      return true;
+    } catch (err) {
+      console.error("pool list failed:", err instanceof AiError ? err.message : err);
+      return false;
+    }
+  }
+
+  private async topUpPool(perRun: number): Promise<void> {
+    for (let i = 0; i < perRun && this.poolSize() < 60; i++) if (!(await this.addPoolList())) break;
+  }
+
+  async adminSeedPool(count: number): Promise<any> {
+    let added = 0;
+    for (let i = 0; i < Math.min(10, Math.max(1, count)); i++) {
+      if (!(await this.addPoolList())) break;
+      added++;
+    }
+    return { ok: true, added, poolSize: this.poolSize() };
+  }
+
+  async adminAddPool(list: any): Promise<any> {
+    const answers = Array.isArray(list?.answers) ? list.answers : [];
+    if (answers.length !== 10 || answers.some((a: any) => typeof a?.answer !== "string" || !a.answer.trim())) return fail(400, "list needs exactly 10 answers");
+    const clean: TopTen = {
+      title: String(list.title ?? "").slice(0, 100) || "Top ten",
+      basis: String(list.basis ?? "").slice(0, 120),
+      source: String(list.source ?? "").slice(0, 140),
+      answers: answers.map((a: any) => ({ answer: String(a.answer).slice(0, 60), aliases: (Array.isArray(a.aliases) ? a.aliases : []).map((x: unknown) => String(x).slice(0, 60)).slice(0, 6), ...(a.detail ? { detail: String(a.detail).slice(0, 80) } : {}) })),
+    };
+    this.q("INSERT INTO ranked_pool (topic, payload, created) VALUES (?, ?, ?)", clean.title, JSON.stringify(clean), Date.now());
+    return { ok: true, poolSize: this.poolSize() };
+  }
+
+  // ---- ranked admin
+
+  async adminMatches(limit = 50): Promise<any> {
+    return this.q(
+      "SELECT m.id, m.ts, m.status, m.outcome, m.reason, m.list_key, m.a_before, m.b_before, m.a_delta, m.b_delta, m.a_risk, m.b_risk, m.flags, a.name AS an, b.name AS bn FROM matches m LEFT JOIN accounts a ON a.id = m.a LEFT JOIN accounts b ON b.id = m.b ORDER BY m.ts DESC LIMIT ?",
+      Math.min(200, limit),
+    ).map((r) => ({
+      id: String(r.id), time: new Date(Number(r.ts)).toISOString(), status: String(r.status), outcome: r.outcome, reason: r.reason, list: String(r.list_key),
+      a: r.an, b: r.bn, aBefore: r.a_before, bBefore: r.b_before, aDelta: r.a_delta, bDelta: r.b_delta, aRisk: Number(r.a_risk), bRisk: Number(r.b_risk), flags: JSON.parse(String(r.flags)),
+    }));
+  }
+
+  /** Undo a match's rating changes (for example after confirming cheating). */
+  async adminVoidMatch(id: string): Promise<any> {
+    const rows = this.q("SELECT * FROM matches WHERE id = ?", id);
+    if (!rows.length) return fail(404, "no such match");
+    const m = rows[0];
+    if (String(m.status) !== "done") return fail(409, "only finished matches can be voided");
+    const undo = (acc: string, delta: number, result: string) => {
+      const r = this.ratingRow(acc);
+      this.q(
+        "UPDATE ratings SET rating = MAX(100, ?), games = MAX(0, games - 1), wins = MAX(0, wins - ?), losses = MAX(0, losses - ?), draws = MAX(0, draws - ?) WHERE account_id = ?",
+        r.rating - delta, result === "w" ? 1 : 0, result === "l" ? 1 : 0, result === "d" ? 1 : 0, acc,
+      );
+    };
+    const o = String(m.outcome);
+    undo(String(m.a), Number(m.a_delta), o === "a" ? "w" : o === "b" ? "l" : "d");
+    undo(String(m.b), Number(m.b_delta), o === "b" ? "w" : o === "a" ? "l" : "d");
+    this.q("UPDATE matches SET status = 'void' WHERE id = ?", id);
+    return { ok: true };
+  }
+
+  async adminSetRating(name: string, rating: number): Promise<any> {
+    const r = this.q("SELECT id FROM accounts WHERE name = ?", name);
+    if (!r.length) return fail(404, "no such player");
+    this.ratingRow(String(r[0].id));
+    this.q("UPDATE ratings SET rating = ?, peak = MAX(peak, ?) WHERE account_id = ?", Math.max(100, Math.round(rating)), Math.round(rating), String(r[0].id));
+    return { ok: true };
+  }
+
   // ---------------------------------------------------------------- admin
 
   async adminDaily(date: string) {
@@ -555,7 +874,10 @@ export class Arena extends DurableObject<Env> {
     const r = this.q("SELECT id FROM accounts WHERE name = ?", name);
     if (!r.length) return fail(404, "no such player");
     this.q("UPDATE accounts SET banned = ? WHERE name = ?", banned ? 1 : 0, name);
-    if (banned) this.q("DELETE FROM sessions WHERE account_id = ?", String(r[0].id));
+    if (banned) {
+      this.q("DELETE FROM sessions WHERE account_id = ?", String(r[0].id));
+      this.queue.delete(String(r[0].id));
+    }
     return { ok: true };
   }
 }

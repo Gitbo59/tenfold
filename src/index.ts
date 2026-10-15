@@ -3,17 +3,11 @@ import { SESSION_COOKIE, cookie, finishRedirect, finishSignIn, parseCookies, pro
 import { Quota } from "./quota";
 import { Room } from "./room";
 import type { Env } from "./types";
+import { makeCode } from "./util";
 
 export { Room, Quota, Arena };
 
-// No 0/O/1/I so codes are easy to read out loud.
-const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_RE = /^[A-Z0-9]{5}$/;
-
-function makeCode(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(5));
-  return Array.from(bytes, (b) => CODE_CHARS[b % CODE_CHARS.length]).join("");
-}
 
 const roomStub = (env: Env, code: string) => env.ROOM.get(env.ROOM.idFromName(code));
 const quotaStub = (env: Env) => env.QUOTA.get(env.QUOTA.idFromName("global"));
@@ -37,6 +31,17 @@ interface ArenaApi {
   adminReview(id: number, action: string): Promise<any>;
   adminBan(name: string, banned: boolean): Promise<any>;
   maintenance(): Promise<void>;
+  identify(token: string | null): Promise<{ id: string; name: string | null } | null>;
+  queueJoin(token: string | null): Promise<any>;
+  queueStatus(token: string | null): Promise<any>;
+  queueLeave(token: string | null): Promise<any>;
+  rankedMe(token: string | null): Promise<any>;
+  rankedLadder(token: string | null, limit?: number): Promise<any>;
+  adminMatches(limit?: number): Promise<any>;
+  adminVoidMatch(id: string): Promise<any>;
+  adminSetRating(name: string, rating: number): Promise<any>;
+  adminAddPool(list: unknown): Promise<any>;
+  adminSeedPool(count: number): Promise<any>;
 }
 const arenaStub = (env: Env): ArenaApi => env.ARENA.get(env.ARENA.idFromName("arena")) as unknown as ArenaApi;
 
@@ -87,7 +92,7 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
     if (!done.ok) return done.response;
     const res = await arena.signIn(done.id);
     if (!res.ok) return Response.redirect(`${url.origin}/?autherror=blocked#/daily`, 302);
-    return finishRedirect(url, res.token);
+    return finishRedirect(url, res.token, done.next);
   }
   if (path === "/api/auth/logout" && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
@@ -136,6 +141,15 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
     return json({ ok: res.ok });
   }
 
+  // ---- ranked 1v1
+  if (path === "/api/ranked/ladder" && request.method === "GET") return reply(await arena.rankedLadder(token, 50));
+  if (path === "/api/ranked/me" && request.method === "GET") return reply(await arena.rankedMe(token));
+  if (path === "/api/ranked/status" && request.method === "GET") return reply(await arena.queueStatus(token));
+  if ((path === "/api/ranked/queue" || path === "/api/ranked/leave") && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    return reply(path.endsWith("queue") ? await arena.queueJoin(token) : await arena.queueLeave(token));
+  }
+
   // ---- owner only
   if (path.startsWith("/api/admin/")) {
     const auth = request.headers.get("Authorization");
@@ -144,6 +158,7 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
     const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
     if (path === "/api/admin/daily" && request.method === "GET") return reply(await arena.adminDaily(date));
     if (path === "/api/admin/attempts" && request.method === "GET") return json(await arena.adminAttempts(date));
+    if (path === "/api/admin/matches" && request.method === "GET") return json(await arena.adminMatches(Number(url.searchParams.get("limit")) || 50));
     if (path === "/api/admin/guesses" && request.method === "GET") return json(await arena.adminGuesses(Number(url.searchParams.get("attempt"))));
     if (request.method === "POST") {
       const body = await readJson(request);
@@ -151,6 +166,10 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
       if (path === "/api/admin/daily") return reply(await arena.adminSetDaily(String(body.date), body.list, body.force === true));
       if (path === "/api/admin/daily/void") return reply(await arena.adminVoidDay(String(body.date), body.void !== false));
       if (path === "/api/admin/attempt") return reply(await arena.adminReview(Number(body.id), String(body.action)));
+      if (path === "/api/admin/match/void") return reply(await arena.adminVoidMatch(String(body.id)));
+      if (path === "/api/admin/rating") return reply(await arena.adminSetRating(String(body.name), Number(body.rating)));
+      if (path === "/api/admin/pool") return reply(await arena.adminAddPool(body.list));
+      if (path === "/api/admin/pool/seed") return reply(await arena.adminSeedPool(Number(body.count) || 1));
       if (path === "/api/admin/ban") return reply(await arena.adminBan(String(body.name), body.banned !== false));
     }
   }
@@ -212,6 +231,14 @@ export default {
       if (!CODE_RE.test(code)) return new Response("Bad room code", { status: 400 });
       const headers = new Headers(request.headers);
       headers.set("x-ip-hash", await ipHash(request));
+      // The signed-in account (from the login cookie, never from anything the browser claims) so ranked rooms know who is who.
+      headers.delete("x-account-id");
+      headers.delete("x-account-name");
+      const who = await arenaStub(env).identify(parseCookies(request)[SESSION_COOKIE] ?? null);
+      if (who?.name) {
+        headers.set("x-account-id", who.id);
+        headers.set("x-account-name", who.name);
+      }
       return roomStub(env, code).fetch(new Request(request, { headers }));
     }
 

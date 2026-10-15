@@ -37,7 +37,8 @@
   const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
 
   // ------------------------------------------------------------------ state
-  const pid = (() => {
+  // In friends rooms this is a random per-tab id. In a ranked match the server tells us our account id.
+  let pid = (() => {
     let v = sessionStorage.getItem("tf_pid");
     if (!v) sessionStorage.setItem("tf_pid", (v = uuid()));
     return v;
@@ -77,10 +78,11 @@
     return key in pending ? pending[key] : serverVal;
   }
 
-  const screens = ["home", "connecting", "lobby", "generating", "game", "daily"];
+  const screens = ["home", "connecting", "lobby", "generating", "game", "daily", "ranked"];
   function show(name) {
     for (const s of screens) $(`#screen-${s}`).hidden = s !== name;
-    $("#btn-leave").hidden = name === "home" || name === "daily";
+    $("#btn-leave").hidden = name === "home" || name === "daily" || name === "ranked";
+    if (name === "home") window.dispatchEvent(new Event("tf:home"));
   }
 
   function toast(msg, kind = "info") {
@@ -195,6 +197,7 @@
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === "state") onState(m);
+      else if (m.t === "you") pid = m.id;
       else if (m.t === "toast") {
         if (m.kind === "error") budgetAt = 0;
         toast(m.msg, m.kind);
@@ -253,15 +256,20 @@
     const me = s.players.find((p) => p.id === pid);
 
     // Watchers rejoin automatically once the room is back in the lobby.
-    if (s.phase === "lobby" && !me && !joinSent) {
+    if (s.phase === "lobby" && !s.ranked && !me && !joinSent) {
       joinSent = true;
       send({ t: "join", pid, name: myName() || "Player" });
     }
     if (me || s.phase !== "lobby") joinSent = false;
 
     if (s.phase === "lobby" || s.phase === "generating") showSource = false;
-    if (s.phase === "lobby") { show("lobby"); animated.clear(); lastLogId = null; myReports.clear(); renderLobby(s, me); }
-    else if (s.phase === "generating") { show("generating"); $("#gen-topic").textContent = s.topic; }
+    if (s.phase === "lobby" && !s.ranked) { show("lobby"); animated.clear(); lastLogId = null; myReports.clear(); renderLobby(s, me); }
+    else if (s.phase === "generating" || (s.phase === "lobby" && s.ranked)) {
+      show("generating");
+      const opp = s.ranked && s.ranked.players.find((p) => p.id !== pid);
+      $("#gen-title").textContent = s.ranked ? "Opponent found" : "Building the top ten";
+      $("#gen-topic").textContent = s.ranked ? `Waiting for ${opp ? opp.name : "your opponent"} to connect…` : s.topic;
+    }
     else { show("game"); renderGame(s, me); }
   }
 
@@ -362,7 +370,7 @@
     const btn = $("#btn-source");
     const line = $("#source-line");
     const visible = !!s.source && (finished || showSource);
-    btn.hidden = finished || !s.source;
+    btn.hidden = finished || !s.source || !!s.ranked;
     btn.textContent = showSource ? "Hide source" : "Show source";
     btn.setAttribute("aria-expanded", String(visible));
     line.hidden = !visible;
@@ -397,6 +405,8 @@
     const isMyTurn = s.phase === "playing" && s.turnPid === pid;
     const cur = s.players.find((p) => p.id === s.turnPid);
 
+    $("#btn-leave").hidden = !!(s.ranked && s.phase === "playing");
+    $("#btn-resign").hidden = !(s.ranked && s.phase === "playing" && me);
     $("#g-title").textContent = s.topic;
     $("#g-basis").textContent = s.listDifficulty ? `${s.basis} (${s.listDifficulty} list)` : s.basis;
     renderSource(s, finished);
@@ -415,6 +425,7 @@
     if (isMyTurn && lastTurnPid !== pid) {
       navigator.vibrate?.(60);
       $("#guess").focus({ preventScroll: true });
+      resetSignals();
     }
     lastTurnPid = s.turnPid;
 
@@ -461,7 +472,7 @@
       .map((p) => {
         const cls = ["player", p.id === s.turnPid ? "turn" : "", p.eliminated ? "out" : ""].join(" ");
         const status = p.eliminated ? "Out" : !p.connected ? "Away" : p.streak >= 2 ? `${p.streak} in a row` : "";
-        return `<li class="${cls}">${avatar(p)}<span class="pname">${esc(p.name)}${p.id === pid ? " (you)" : ""}</span><span class="pscore">${p.score}</span><span class="pmeta">${hearts(p)}${status ? `<span>${status}</span>` : ""}</span></li>`;
+        return `<li class="${cls}">${avatar(p)}<span class="pname">${esc(p.name)}${p.id === pid ? " (you)" : ""}${p.rating ? `<span class="rating">${p.rating}</span>` : ""}</span><span class="pscore">${p.score}</span><span class="pmeta">${hearts(p)}${status ? `<span>${status}</span>` : ""}</span></li>`;
       })
       .join("");
 
@@ -496,7 +507,26 @@
       else if (s.players.length === 1) title = `You scored ${winners[0].score} points`;
       else if (winners.length === 1) title = `${winners[0].name} wins with ${winners[0].score} points`;
       else title = `${winners.map((w) => w.name).join(" and ")} tie on ${winners[0].score} points`;
+      let ratingLine = "";
+      if (s.ranked) {
+        const r = s.ranked.result;
+        const idx = s.ranked.players.findIndex((p) => p.id === pid);
+        if (r && r.outcome === "abort") { title = "Match cancelled"; ratingLine = "No rating change."; }
+        else if (r) {
+          const won = (r.outcome === "a" && idx === 0) || (r.outcome === "b" && idx === 1);
+          title = r.outcome === "draw" ? "Draw" : won ? "You won" : "You lost";
+          if (r.pending) ratingLine = "Updating your rating…";
+          else if (idx >= 0) {
+            const delta = idx === 0 ? r.aDelta : r.bDelta;
+            const after = idx === 0 ? r.aRating : r.bRating;
+            ratingLine = `Rating ${after - delta} → ${after} (${delta >= 0 ? "+" : ""}${delta})`;
+          }
+        }
+      }
       $("#res-title").textContent = title;
+      const rl = $("#res-rating");
+      rl.hidden = !ratingLine;
+      rl.textContent = ratingLine;
       let place = 0, prev = null;
       $("#res-list").innerHTML = sorted
         .map((p, i) => {
@@ -506,8 +536,9 @@
         })
         .join("");
       const isHost = s.hostId === pid;
-      $("#btn-rematch").hidden = !isHost;
-      $("#res-wait").hidden = isHost || !me;
+      $("#btn-rematch").hidden = !!s.ranked || !isHost;
+      $("#res-wait").hidden = !!s.ranked || isHost || !me;
+      $("#btn-ranked-back").hidden = !s.ranked;
     }
     tick();
   }
@@ -676,13 +707,54 @@
     if (state) render();
   });
 
+  // Quiet fair-play signals for ranked answers (see src/anticheat.ts): how an answer was entered, never what's on screen.
+  const sig = { paste: false, keys: 0, firstKey: 0, blurMs: 0, blurStart: 0, refocusAt: 0 };
+  const tnow = () => performance.now();
+  function resetSignals() {
+    sig.paste = false; sig.keys = 0; sig.firstKey = 0; sig.blurMs = 0; sig.refocusAt = 0;
+    sig.blurStart = document.hidden || (document.hasFocus && !document.hasFocus()) ? tnow() : 0;
+  }
+  function collectSignals() {
+    const t = tnow();
+    return {
+      paste: sig.paste,
+      keys: sig.keys,
+      typeMs: sig.firstKey ? Math.round(t - sig.firstKey) : 0,
+      blurMs: Math.round(sig.blurMs + (sig.blurStart ? t - sig.blurStart : 0)),
+      refocusMs: sig.refocusAt ? Math.round(t - sig.refocusAt) : 99999,
+    };
+  }
+  const guessBox = $("#guess");
+  guessBox.addEventListener("keydown", (e) => {
+    if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab"].includes(e.key)) return;
+    sig.keys++;
+    if (!sig.firstKey) sig.firstKey = tnow();
+  });
+  guessBox.addEventListener("paste", () => { sig.paste = true; });
+  guessBox.addEventListener("drop", () => { sig.paste = true; });
+  guessBox.addEventListener("input", (e) => {
+    if (e.inputType && /insertFromPaste|insertFromDrop|insertFromYank/.test(e.inputType)) sig.paste = true;
+  });
+  const goneAway = () => { if (!sig.blurStart) sig.blurStart = tnow(); };
+  const cameBack = () => { if (sig.blurStart) { sig.blurMs += tnow() - sig.blurStart; sig.blurStart = 0; sig.refocusAt = tnow(); } };
+  window.addEventListener("blur", goneAway);
+  window.addEventListener("focus", cameBack);
+  document.addEventListener("visibilitychange", () => (document.hidden ? goneAway() : cameBack()));
+
   $("#guess-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const input = $("#guess");
     const text = input.value.trim();
     if (!text || input.disabled) return;
-    send({ t: "guess", text });
+    send({ t: "guess", text, ...(state && state.ranked ? { sig: collectSignals() } : {}) });
     input.value = "";
+  });
+  $("#btn-resign").addEventListener("click", () => {
+    if (confirm("Resign this ranked match? It counts as a loss.")) send({ t: "resign" });
+  });
+  $("#btn-ranked-back").addEventListener("click", () => {
+    leaveRoom(true);
+    location.hash = "#/ranked";
   });
   $("#btn-rematch").addEventListener("click", () => send({ t: "rematch" }));
 
@@ -692,10 +764,16 @@
     show("daily");
     window.dispatchEvent(new Event("tf:daily"));
   }
-  window.Tenfold = { $, $$, esc, show, toast, openDaily };
+  function openRanked() {
+    if (code) leaveRoom(true);
+    show("ranked");
+    window.dispatchEvent(new Event("tf:ranked"));
+  }
+  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, enterRoom: (c) => enterRoom(c) };
   function route() {
     if (location.hash.startsWith("#/daily")) openDaily();
-    else if (!code && !$("#screen-daily").hidden) show("home");
+    else if (location.hash.startsWith("#/ranked")) openRanked();
+    else if (!code && (!$("#screen-daily").hidden || !$("#screen-ranked").hidden)) show("home");
   }
   window.addEventListener("hashchange", route);
 
@@ -707,6 +785,8 @@
   const saved = sessionStorage.getItem("tf_room");
   if (location.hash.startsWith("#/daily")) {
     openDaily();
+  } else if (location.hash.startsWith("#/ranked")) {
+    openRanked();
   } else if (saved && myName()) {
     fetch(`/api/rooms/${saved}`).then((r) => (r.ok ? enterRoom(saved) : (sessionStorage.removeItem("tf_room"), show("home")))).catch(() => show("home"));
   } else {

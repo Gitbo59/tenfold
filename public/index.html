@@ -52,7 +52,22 @@
         <div class="mode-card">
           <h2 class="h2">Daily challenge</h2>
           <p class="hint">Solo and ranked. One list a day, the same for everyone, scored on speed. Free to play with a sign-in.</p>
-          <a class="btn" id="btn-daily" href="#/daily">Play today's challenge</a>
+          <a class="btn btn-primary" id="btn-daily" href="#/daily">Play today's challenge</a>
+          <div class="home-lb">
+            <div class="tabs" role="tablist" aria-label="Daily leaderboard">
+              <button class="htab" type="button" role="tab" data-home-tab="today" aria-selected="true">Today</button>
+              <button class="htab" type="button" role="tab" data-home-tab="month" aria-selected="false">This month</button>
+            </div>
+            <div id="home-lb-body" class="lb-body"><p class="hint">Loading the leaderboard…</p></div>
+          </div>
+        </div>
+        <div class="mode-card">
+          <h2 class="h2">Ranked 1v1</h2>
+          <p class="hint">Queue for a match against someone near your rating. Win to climb, and beating a higher-rated player earns more. Needs a sign-in.</p>
+          <a class="btn btn-primary" id="btn-ranked" href="#/ranked">Find a ranked match</a>
+          <div class="home-lb">
+            <div id="home-ladder-body" class="lb-body"><p class="hint">Loading the ladder…</p></div>
+          </div>
         </div>
       </div>
 
@@ -139,6 +154,60 @@
         <input id="daily-guess" maxlength="80" placeholder="Type an answer" aria-label="Your answer" autocapitalize="words" spellcheck="false">
         <button id="daily-guess-btn" class="btn btn-primary" type="submit">Lock in</button>
       </form>
+    </section>
+
+
+    <!-- Ranked 1v1 -->
+    <section id="screen-ranked" class="screen ranked" hidden>
+      <a class="back-link" href="#/" id="ranked-back">Back to Tenfold</a>
+      <div class="daily-head">
+        <h1 class="display daily-title">Ranked 1v1</h1>
+        <p class="lede">Queue for a match against someone near your rating. Win to climb. The better your opponent, the more a win is worth.</p>
+      </div>
+
+      <div id="ranked-signin" class="panel" hidden>
+        <h2 class="h2">Sign in to play ranked</h2>
+        <p class="hint">We use your Google, GitHub or Discord account only to show you're one person. We never see your email address or password.</p>
+        <div id="ranked-providers" class="providers"></div>
+        <p id="ranked-no-providers" class="hint" hidden>Sign-in isn't set up on this site yet.</p>
+      </div>
+
+      <form id="ranked-name-form" class="panel" hidden>
+        <h2 class="h2">Choose a display name</h2>
+        <p class="hint">It appears on the ladder and in matches. Please don't use your real name or an email address.</p>
+        <label class="field">
+          <span class="field-label">Display name (3 to 16 characters)</span>
+          <input id="ranked-name" maxlength="16" autocomplete="off" required>
+        </label>
+        <button class="btn btn-primary" type="submit">Save name</button>
+      </form>
+
+      <div id="ranked-profile" class="panel" hidden>
+        <div class="rating-head"><span id="rk-rating" class="rating-big">1200</span><span id="rk-prov" class="hint"></span></div>
+        <p id="rk-record" class="hint"></p>
+        <ul class="rules-list">
+          <li>Every match uses the same rules: <strong>3 lives, 20 seconds an answer, no hints</strong>. You take turns on one shared board.</li>
+          <li>Score more than your opponent to win. If they run out of lives while you're ahead, the match ends there.</li>
+          <li>Resigning or being disconnected for over a minute counts as a loss. A match that never starts changes nothing.</li>
+          <li>It's an Elo-style rating: new players move faster for their first 20 games. We run automatic fair-play checks. <a href="/rules">Read the rules</a>.</li>
+        </ul>
+        <div id="rk-idle"><button id="rk-find" class="btn btn-primary btn-big" type="button">Find a match</button></div>
+        <div id="rk-wait" hidden>
+          <p id="rk-wait-text" class="lede"></p>
+          <button id="rk-cancel" class="btn" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <div id="ranked-ladder" class="panel">
+        <h2 class="h2">Ranked ladder</h2>
+        <div id="rk-ladder-body" class="lb-body"><p class="hint">Loading the ladder…</p></div>
+      </div>
+
+      <div id="ranked-account" class="account-row" hidden>
+        <span>Signed in as <strong id="rk-acct-name"></strong></span>
+        <button id="rk-signout" class="btn btn-quiet" type="button">Sign out</button>
+      </div>
+      <p class="legal-links"><a href="/rules">Rules, fair play and privacy</a></p>
     </section>
 
     <!-- Connecting -->
@@ -248,7 +317,7 @@
       <ol class="loader" aria-hidden="true">
         <li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li><li></li>
       </ol>
-      <h2 class="h2">Building the top ten</h2>
+      <h2 id="gen-title" class="h2">Building the top ten</h2>
       <p id="gen-topic" class="lede"></p>
     </section>
 
@@ -269,6 +338,8 @@
         <p id="clock-num" class="clock-num"></p>
       </div>
 
+      <div class="resign-row"><button id="btn-resign" class="btn btn-quiet btn-small" type="button" hidden>Resign</button></div>
+
       <div id="hint-bar" class="hint-bar" hidden>
         <button id="btn-hint" class="btn btn-small" type="button"></button>
         <span id="hint-note" class="hint"></span>
@@ -276,9 +347,11 @@
 
       <div id="results" class="panel results" hidden>
         <h2 id="res-title" class="display res-title"></h2>
+        <p id="res-rating" class="lede" hidden></p>
         <ol id="res-list" class="standings"></ol>
         <div class="res-actions">
           <button id="btn-rematch" class="btn btn-primary" type="button">Play again</button>
+          <button id="btn-ranked-back" class="btn btn-primary" type="button" hidden>Back to Ranked</button>
           <p id="res-wait" class="hint" hidden>Waiting for the host to start another round.</p>
         </div>
       </div>
@@ -320,5 +393,6 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/app.js" defer></script>
   <script src="/daily.js" defer></script>
+  <script src="/ranked.js" defer></script>
 </body>
 </html>

@@ -34,7 +34,9 @@ const clamp = (v: unknown, max: number): number => {
   return Math.min(max, Math.max(0, n));
 };
 
-export function cleanSignals(raw: any, len: number): Signals {
+/** Returns null when no signals were sent at all. The real page always sends them. */
+export function cleanSignals(raw: any, len: number): Signals | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   return {
     paste: raw?.paste === true,
     keys: clamp(raw?.keys, 500),
@@ -45,7 +47,9 @@ export function cleanSignals(raw: any, len: number): Signals {
   };
 }
 
-export function assessGuess(sig: Signals, ctx: { correct: boolean; rank: number; elapsedMs: number }): Assessment {
+export function assessGuess(sig: Signals | null, ctx: { correct: boolean; rank: number; elapsedMs: number }): Assessment {
+  // Anything that skips the page and calls the API directly won't send signals.
+  if (!sig) return { weight: 1, flags: ["no-signals"] };
   let weight = 0;
   const flags: string[] = [];
   const add = (w: number, f: string) => { weight += w; flags.push(f); };
