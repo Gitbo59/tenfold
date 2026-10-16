@@ -82,6 +82,12 @@
   function show(name) {
     for (const s of screens) $(`#screen-${s}`).hidden = s !== name;
     $("#btn-leave").hidden = name === "home" || name === "daily" || name === "ranked";
+    // The For fun / Ranked switch shows on the main pages and hides while you're in a room.
+    $("#mode-pill").hidden = !["home", "ranked", "daily"].includes(name);
+    for (const a of $$("#mode-pill a")) {
+      if (a.dataset.mode === (name === "home" ? "fun" : "ranked")) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    }
     if (name === "home") window.dispatchEvent(new Event("tf:home"));
   }
 
@@ -759,6 +765,30 @@
   $("#btn-rematch").addEventListener("click", () => send({ t: "rematch" }));
 
   // ------------------------------------------------------------------ daily challenge hooks (see daily.js)
+  // ------------------------------------------------------------------ avatars (preset colour + picture, never a photo)
+  const AV_HUES = [210, 340, 28, 150, 270, 190, 50, 0, 310, 120, 230, 80];
+  const AV_ICONS = [
+    '<path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.2l-5.9 3.4 1.3-6.6-4.9-4.6 6.6-.8z"/>',
+    '<path d="M13.5 2L5 13.5h5.5L9.5 22 19 10h-5.8z"/>',
+    '<path d="M3 8l4.5 4L12 4l4.5 8L21 8l-2 11H5z"/>',
+    '<path d="M12 2c.6 3.6 5 5.6 5 10.5a5 5 0 0 1-10 0c0-1.9.9-3.1 1.9-4 .1 1.8.9 2.7 2 2.8C10.2 8.7 10.2 5.4 12 2z"/>',
+    '<path d="M12 2l8 8-8 12L4 10z"/>',
+    '<path d="M20 14.6A8.6 8.6 0 0 1 9.4 4 8.6 8.6 0 1 0 20 14.6z"/>',
+    '<path d="M20 4C10.5 4 4 9 4 15.2 4 18 6 20 9 20c6 0 11-6 11-16z"/>',
+    '<path d="M12 2l8 3v6c0 5-3.4 8.8-8 11-4.6-2.2-8-6-8-11V5z"/>',
+    '<path d="M12 2a6 6 0 0 0-6 6v4l-2 3v1h16v-1l-2-3V8a6 6 0 0 0-6-6zM10 19a2 2 0 0 0 4 0z"/>',
+    '<path fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12zm0 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>',
+    '<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z"/>',
+    '<circle cx="12" cy="12" r="5"/><path d="M11 1h2v4h-2zM11 19h2v4h-2zM1 11h4v2H1zM19 11h4v2h-4zM4.2 5.6l1.4-1.4 2.8 2.8-1.4 1.4zM15.6 17l1.4-1.4 2.8 2.8-1.4 1.4zM5.6 19.8L4.2 18.4 7 15.6l1.4 1.4zM17 8.4l-1.4-1.4 2.8-2.8 1.4 1.4z"/>',
+  ];
+  /** "colour:picture" (0 to 11 each) as a round SVG badge. */
+  function avatarSvg(av, size = 32) {
+    const m = /^(\d{1,2}):(\d{1,2})$/.exec(av || "");
+    const c = m ? Number(m[1]) % 12 : 0;
+    const i = m ? Number(m[2]) % 12 : 0;
+    return `<svg class="av" width="${size}" height="${size}" viewBox="0 0 40 40" role="img" aria-label="Profile picture"><circle cx="20" cy="20" r="20" fill="hsl(${AV_HUES[c]} 62% 50%)"/><g transform="translate(8 8)" fill="#fff">${AV_ICONS[i]}</g></svg>`;
+  }
+
   function openDaily() {
     if (code) leaveRoom(true);
     show("daily");
@@ -769,7 +799,7 @@
     show("ranked");
     window.dispatchEvent(new Event("tf:ranked"));
   }
-  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, enterRoom: (c) => enterRoom(c) };
+  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, enterRoom: (c) => enterRoom(c), avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
   function route() {
     if (location.hash.startsWith("#/daily")) openDaily();
     else if (location.hash.startsWith("#/ranked")) openRanked();

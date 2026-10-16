@@ -14,7 +14,9 @@ const quotaStub = (env: Env) => env.QUOTA.get(env.QUOTA.idFromName("global"));
 /** A plain description of the Arena's methods. (The generated RPC types are too deep for the compiler here.) */
 interface ArenaApi {
   signIn(idHash: string): Promise<{ ok: true; token: string; name: string | null } | { ok: false; status: number; error: string }>;
-  me(token: string | null): Promise<{ signedIn: boolean; name: string | null }>;
+  me(token: string | null): Promise<{ signedIn: boolean; name: string | null; avatar: string | null }>;
+  setAvatar(token: string | null, color: unknown, icon: unknown): Promise<any>;
+  rankedHistory(token: string | null, limit?: number): Promise<any>;
   signOut(token: string | null): Promise<void>;
   setName(token: string | null, name: string): Promise<any>;
   deleteMe(token: string | null): Promise<{ ok: boolean; status?: number }>;
@@ -109,6 +111,11 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
     const body = await readJson(request);
     return body ? reply(await arena.setName(token, body.name)) : json({ error: "Bad request" }, 400);
   }
+  if (path === "/api/me/avatar" && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    const body = await readJson(request);
+    return body ? reply(await arena.setAvatar(token, body.color, body.icon)) : json({ error: "Bad request" }, 400);
+  }
   if (path === "/api/me/delete" && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
     const res = await arena.deleteMe(token);
@@ -143,6 +150,7 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
 
   // ---- ranked 1v1
   if (path === "/api/ranked/ladder" && request.method === "GET") return reply(await arena.rankedLadder(token, 50));
+  if (path === "/api/ranked/history" && request.method === "GET") return reply(await arena.rankedHistory(token, 12));
   if (path === "/api/ranked/me" && request.method === "GET") return reply(await arena.rankedMe(token));
   if (path === "/api/ranked/status" && request.method === "GET") return reply(await arena.queueStatus(token));
   if ((path === "/api/ranked/queue" || path === "/api/ranked/leave") && request.method === "POST") {

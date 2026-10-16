@@ -59,14 +59,28 @@ Anyone still in the game can vote for a hint, and can withdraw the vote. When **
 
 **Close answers count.** Capitalisation, accents, "the" and punctuation are ignored. Small typos are accepted (longer answers allow more). A partial name counts when it points to one answer: "Everest" for "Mount Everest", "Parbat" for "Nanga Parbat", "Lake Victoria" for "Victoria". It doesn't count when it could mean two answers ("Kane" with both Harry Kane and Kane Williamson on the list), when it is only a filler word ("Lake", "United", "New"), or when it contains a second name ("Chad Kenya"), so nobody can hedge. When a typo or partial name is accepted, the feed shows what was typed. The AI also supplies aliases. Re-guessing something already found, or a wrong answer someone already tried, is free. If a player disconnects, their turn is skipped without penalty, and they can rejoin from the same tab.
 
+## The two sides of the site
+
+A pill at the top centre switches between them (it hides while you're inside a game room):
+
+- **For fun** is the home page: the original room-based game with friends, no account needed.
+- **Ranked** needs a sign-in. Once you're in, the Ranked page is a hub with:
+  - **Your profile:** your picture, display name and rating, with peak rating, games played, win rate, won-lost-drawn record, your current streak, your place on the ladder and a small chart of your last 20 ratings.
+  - **Ranked match:** the queue button, and a short "how ranked works" panel.
+  - **Recent ranked games:** each opponent (with their picture and rating), the result, how many points you gained or lost, your rating afterwards, the list that was played and how it ended.
+  - **Daily challenge:** today's status (not started, in progress, or your score and place), a button to play, and the daily and monthly leaderboards.
+  - **Ranked ladder:** the top 20 by rating, with your own row added if you're further down.
+
+**Profile pictures** are chosen from a fixed set: 12 colours and 12 pictures (stable defaults are assigned until you pick). They are stored as two small numbers, never as photos or links to photos. That is deliberate: sign-in providers' profile photos are personal data, and keeping them out of your database fits the "nothing sensitive to look after" design. If you later want provider photos, they could be added as an opt-in (GitHub and Discord already send an avatar link in the sign-in response, Google needs an extra permission), but you would then be storing a link to someone's photo.
+
 ## Daily challenge (competitive mode)
 
-The site now has two modes. **Play with friends** is the room-based game described above. The **Daily challenge** is solo and ranked:
+The **Daily challenge** is solo and ranked. It's reached from the Ranked hub:
 
 - One list a day, the same for everyone, starting at 00:00 UTC. The list is built ahead of time (a scheduled job at 03:15 UTC makes sure the next three days exist) so you can review it before anyone plays.
 - Sign-in required, one attempt a day, three lives, 30 seconds per answer. The clock runs on the server and keeps running if you close the page.
 - Score = (11 minus rank) x (1 + time bonus) x 10, so the top answer is worth 100 to 200 points and the 10th is worth 10 to 20. Ties go to the lower total time.
-- Daily and monthly leaderboards (the top 10 also show on the home page for everyone, signed in or not), and a "Yesterday's answers" tab. Today's missed answers are never shown until the day ends, so nobody can pass them on.
+- Daily and monthly leaderboards (on the Ranked hub and on the challenge page), and a "Yesterday's answers" tab. Today's missed answers are never shown until the day ends, so nobody can pass them on.
 - Quiet fair-play checks (see below), a rules and privacy page at `/rules`, and a free-to-enter design (nothing you can buy affects a score).
 
 ### How accounts work (and what you don't store)
@@ -133,7 +147,7 @@ A third mode, separate from the friends rooms and from the daily challenge. It h
 - **Rules are fixed:** 3 lives, 20 seconds an answer, no hints, one shared board, and the same scoring as friends rooms. Score more than your opponent to win. If they run out of lives while you're ahead, the match ends immediately. Source lookups are disabled until it's over.
 - **Rating:** Elo. Everyone starts at 1200, and after each match your rating moves by K x (result minus expected result). The expected result comes from the rating gap, so beating a higher-rated player earns much more than beating a lower-rated one, and losing to a weaker player costs more. K is 40 for your first 20 games and 20 after that, and ratings never go below 100. A draw (equal scores) counts as half a win. This is the classic Elo formula. chess.com uses Glicko, which tracks a separate "rating deviation" per player; that would be a possible later upgrade.
 - **Leaving:** resigning is a loss. A disconnect gets 60 seconds to reconnect (refreshing the page is fine) before it counts as a forfeit. If someone never connects at all, the match is cancelled and nobody's rating changes.
-- **Ladder:** top 50 by rating on the Ranked page and the top 5 on the home page. Players appear after 3 rated games, and a `?` marks a still-provisional rating (under 20 games).
+- **Ladder:** the top 20 by rating on the Ranked page, with your own row added if you're lower. Players appear after 3 rated games, and a `?` marks a still-provisional rating (under 20 games).
 - **Security:** a ranked room only lets in the two matched accounts, identified by their login cookie, and shows names from their accounts, so nobody can claim to be someone else.
 - **Fair play:** answers carry the same quiet typing signals as the daily challenge (plus a small flag for any answer sent without them, which means someone is calling the API directly). They're stored with the match for you to review and never shown to players. Ratings still apply when a match is flagged; you void a match if you confirm cheating.
 - **Cost:** a match uses no AI requests. Lists come from the built-in lists, past daily lists, and a pool that the scheduled job tops up by 2 a day (to 60). To fill the pool faster, run the seed call below. It uses the same small reserve as the daily list.

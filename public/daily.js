@@ -221,9 +221,11 @@
   function tableHtml(rows, me, month) {
     if (!rows.length) return '<p class="hint">Nobody has finished yet. Be the first.</p>';
     const row = (r) =>
-      `<tr class="${r.me ? "me" : ""}"><td class="rk">${r.rank}</td><td>${esc(r.name)}${r.me ? " (you)" : ""}</td><td class="num">${r.score}</td><td class="num">${month ? `${r.days} ${r.days === 1 ? "day" : "days"}` : `${r.found}/10`}</td><td class="num">${msText(r.ms)}</td></tr>`;
+      `<tr class="${r.me ? "me" : ""}"><td class="rk">${r.rank}</td><td><span class="who-cell">${r.avatar ? T.avatar(r.avatar, 24) : ""}${esc(r.name)}${r.me ? " (you)" : ""}</span></td><td class="num">${r.score}</td><td class="num">${month ? `${r.days} ${r.days === 1 ? "day" : "days"}` : `${r.found}/10`}</td><td class="num">${msText(r.ms)}</td></tr>`;
     return `<table class="lb"><thead><tr><th>#</th><th>Player</th><th class="num">Points</th><th class="num">${month ? "Played" : "Found"}</th><th class="num">Time</th></tr></thead><tbody>${rows.map(row).join("")}${me ? row(me) : ""}</tbody></table>`;
   }
+
+  T.lbTable = tableHtml; // the Ranked hub shows the same table
 
   async function loadBoard() {
     const body = $("#lb-body");
@@ -247,29 +249,6 @@
       loadBoard();
     });
   }
-
-  // ------------------------------------------------------------------ home page leaderboard
-  let homeTab = "today";
-  let homeAt = 0;
-  async function loadHomeBoard(force) {
-    if (!force && Date.now() - homeAt < 30000) return;
-    homeAt = Date.now();
-    const b = await api(`/api/daily/leaderboard?scope=${homeTab}`);
-    const body = $("#home-lb-body");
-    if (!b.rows) { body.innerHTML = '<p class="hint">Couldn\'t load the leaderboard just now.</p>'; return; }
-    const top = b.rows.slice(0, 10);
-    const me = b.me || b.rows.find((r) => r.me && r.rank > 10) || null;
-    body.innerHTML = tableHtml(top, me, homeTab === "month");
-  }
-  for (const t of $$(".htab")) {
-    t.addEventListener("click", () => {
-      homeTab = t.dataset.homeTab;
-      for (const o of $$(".htab")) o.setAttribute("aria-selected", String(o === t));
-      loadHomeBoard(true);
-    });
-  }
-  window.addEventListener("tf:home", () => loadHomeBoard());
-  if (!$("#screen-home").hidden) loadHomeBoard(true);
 
   // ------------------------------------------------------------------ account
   $("#daily-name-form").addEventListener("submit", async (e) => {

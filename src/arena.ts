@@ -45,7 +45,10 @@ interface AccountRow {
   id: string;
   name: string | null;
   banned: number;
+  avatar: string | null;
 }
+
+const AVATAR_RE = /^\d{1,2}:\d{1,2}$/;
 
 const sha256hex = async (text: string): Promise<string> => {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -92,6 +95,9 @@ export class Arena extends DurableObject<Env> {
     sql.exec("CREATE TABLE IF NOT EXISTS ratings (account_id TEXT PRIMARY KEY, rating INTEGER NOT NULL, games INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0, peak INTEGER NOT NULL, recent TEXT NOT NULL DEFAULT '[]', updated INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, code TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, list_key TEXT NOT NULL, status TEXT NOT NULL, a_before INTEGER, b_before INTEGER, a_delta INTEGER, b_delta INTEGER, outcome TEXT, reason TEXT, a_risk INTEGER NOT NULL DEFAULT 0, b_risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '{}')");
     sql.exec("CREATE TABLE IF NOT EXISTS ranked_pool (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, payload TEXT NOT NULL, created INTEGER NOT NULL)");
+    // Added later; harmless if the column already exists.
+    try { sql.exec("ALTER TABLE accounts ADD COLUMN avatar TEXT"); } catch { /* already there */ }
+    try { sql.exec("ALTER TABLE matches ADD COLUMN title TEXT"); } catch { /* already there */ }
     sql.exec("CREATE INDEX IF NOT EXISTS matches_status ON matches (status, ts)");
     sql.exec("CREATE INDEX IF NOT EXISTS attempts_date ON attempts (date, state)");
     sql.exec("CREATE INDEX IF NOT EXISTS guesses_attempt ON guesses (attempt_id)");
@@ -148,13 +154,13 @@ export class Arena extends DurableObject<Env> {
   private async account(token: string | null): Promise<AccountRow | null> {
     if (!token) return null;
     const rows = this.q(
-      "SELECT a.id, a.name, a.banned FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires > ?",
+      "SELECT a.id, a.name, a.banned, a.avatar FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires > ?",
       await sha256hex(token),
       Date.now(),
     );
     if (!rows.length) return null;
     const r = rows[0];
-    return { id: String(r.id), name: r.name === null ? null : String(r.name), banned: Number(r.banned) };
+    return { id: String(r.id), name: r.name === null ? null : String(r.name), banned: Number(r.banned), avatar: r.avatar === null || r.avatar === undefined ? null : String(r.avatar) };
   }
 
   private limited(id: string): boolean {
@@ -181,9 +187,24 @@ export class Arena extends DurableObject<Env> {
     return { ok: true, token, name: found.length && found[0].name !== null ? String(found[0].name) : null };
   }
 
-  async me(token: string | null): Promise<{ signedIn: boolean; name: string | null }> {
+  /** "colour:emblem" (each 0 to 11). Everyone gets a stable default until they pick one. No photos are ever stored. */
+  private avatarOf(id: string, stored: unknown): string {
+    if (typeof stored === "string" && AVATAR_RE.test(stored)) return stored;
+    return `${parseInt(id.slice(0, 2), 16) % 12}:${parseInt(id.slice(2, 4), 16) % 12}`;
+  }
+
+  async me(token: string | null): Promise<{ signedIn: boolean; name: string | null; avatar: string | null }> {
     const a = await this.account(token);
-    return a ? { signedIn: true, name: a.name } : { signedIn: false, name: null };
+    return a ? { signedIn: true, name: a.name, avatar: this.avatarOf(a.id, a.avatar) } : { signedIn: false, name: null, avatar: null };
+  }
+
+  async setAvatar(token: string | null, color: unknown, icon: unknown): Promise<{ ok: true; avatar: string } | Fail> {
+    const a = await this.account(token);
+    if (!a) return fail(401, "Sign in first.");
+    const c = Number(color), i = Number(icon);
+    if (!Number.isInteger(c) || !Number.isInteger(i) || c < 0 || c > 11 || i < 0 || i > 11) return fail(400, "Pick one of the colours and one of the pictures.");
+    this.q("UPDATE accounts SET avatar = ? WHERE id = ?", `${c}:${i}`, a.id);
+    return { ok: true, avatar: `${c}:${i}` };
   }
 
   async signOut(token: string | null): Promise<void> {
@@ -466,18 +487,19 @@ export class Arena extends DurableObject<Env> {
     let rows: any[];
     if (month) {
       rows = this.q(
-        `SELECT acc.id AS id, acc.name AS name, SUM(a.score) AS score, COUNT(*) AS days, SUM(a.total_ms) AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id JOIN daily_lists d ON d.date = a.date AND d.status = 'ok' WHERE substr(a.date, 1, 7) = ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 GROUP BY acc.id ORDER BY score DESC, ms ASC LIMIT 300`,
+        `SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, SUM(a.score) AS score, COUNT(*) AS days, SUM(a.total_ms) AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id JOIN daily_lists d ON d.date = a.date AND d.status = 'ok' WHERE substr(a.date, 1, 7) = ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 GROUP BY acc.id ORDER BY score DESC, ms ASC LIMIT 300`,
         month, viewer ?? "",
       );
     } else {
       rows = this.q(
-        `SELECT acc.id AS id, acc.name AS name, a.score AS score, a.found AS found, a.total_ms AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id WHERE a.date = ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 AND a.review != 'void' ORDER BY a.score DESC, a.total_ms ASC, a.id ASC LIMIT 300`,
+        `SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, a.score AS score, a.found AS found, a.total_ms AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id WHERE a.date = ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 AND a.review != 'void' ORDER BY a.score DESC, a.total_ms ASC, a.id ASC LIMIT 300`,
         date, viewer ?? "",
       );
     }
     const mapped = rows.map((r, i) => ({
       rank: i + 1,
       name: String(r.name),
+      avatar: this.avatarOf(String(r.id), r.avatar),
       score: Number(r.score),
       ms: Number(r.ms),
       ...(month ? { days: Number(r.days) } : { found: JSON.parse(String(r.found)).length }),
@@ -663,7 +685,7 @@ export class Arena extends DurableObject<Env> {
     }
     if (!room) return;
     const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (n) => n.toString(16).padStart(2, "0")).join("");
-    this.q("INSERT INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)", id, Date.now(), code, a.id, b.id, key, a.rating, b.rating);
+    this.q("INSERT INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before, title) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)", id, Date.now(), code, a.id, b.id, key, a.rating, b.rating, String(list.title).slice(0, 100));
     const res = await room.fetch("https://room/ranked-setup", {
       method: "POST",
       body: JSON.stringify({ matchId: id, listKey: key, list, players: [{ id: a.id, name: a.name, rating: a.rating }, { id: b.id, name: b.name, rating: b.rating }] }),
@@ -705,22 +727,79 @@ export class Arena extends DurableObject<Env> {
     return done({ outcome: o.winner, aDelta, bDelta, aRating: ra.rating + aDelta, bRating: rb.rating + bDelta });
   }
 
+  private ladderRows(min: number, viewer: string | null) {
+    return this.q(
+      "SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, r.rating AS rating, r.games AS games, r.wins AS wins, r.losses AS losses, r.draws AS draws FROM ratings r JOIN accounts acc ON acc.id = r.account_id WHERE r.games >= ? AND acc.banned = 0 AND acc.name IS NOT NULL ORDER BY r.rating DESC, r.games DESC, acc.name ASC LIMIT 200",
+      min,
+    ).map((r, i) => ({
+      id: String(r.id), rank: i + 1, name: String(r.name), avatar: this.avatarOf(String(r.id), r.avatar), rating: Number(r.rating), games: Number(r.games),
+      wins: Number(r.wins), losses: Number(r.losses), draws: Number(r.draws), provisional: Number(r.games) < PROVISIONAL_GAMES, me: viewer !== null && String(r.id) === viewer,
+    }));
+  }
+
+  private ladderMin(): number {
+    return Math.max(1, Math.floor(num(this.env.RANKED_LADDER_MIN_GAMES, 3)));
+  }
+
   async rankedMe(token: string | null): Promise<any> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
     const r = this.ratingRow(acc.id);
-    return { ok: true, name: acc.name, rating: r.rating, games: r.games, wins: r.wins, losses: r.losses, draws: r.draws, peak: r.peak, provisional: r.games < PROVISIONAL_GAMES, ...this.statusFor(acc.id) };
+    const mine = this.ladderRows(this.ladderMin(), acc.id).find((x) => x.me);
+    return {
+      ok: true, name: acc.name, avatar: this.avatarOf(acc.id, acc.avatar), rating: r.rating, games: r.games, wins: r.wins, losses: r.losses, draws: r.draws, peak: r.peak,
+      provisional: r.games < PROVISIONAL_GAMES, rank: mine ? mine.rank : null, ...this.statusFor(acc.id),
+    };
   }
 
   async rankedLadder(token: string | null, limit = 50): Promise<any> {
     const me = await this.account(token);
-    const min = Math.max(1, Math.floor(num(this.env.RANKED_LADDER_MIN_GAMES, 3)));
-    const rows = this.q(
-      "SELECT acc.id AS id, acc.name AS name, r.rating AS rating, r.games AS games, r.wins AS wins, r.losses AS losses, r.draws AS draws FROM ratings r JOIN accounts acc ON acc.id = r.account_id WHERE r.games >= ? AND acc.banned = 0 AND acc.name IS NOT NULL ORDER BY r.rating DESC, r.games DESC, acc.name ASC LIMIT 200",
-      min,
-    ).map((r, i) => ({ rank: i + 1, name: String(r.name), rating: Number(r.rating), games: Number(r.games), wins: Number(r.wins), losses: Number(r.losses), draws: Number(r.draws), provisional: Number(r.games) < PROVISIONAL_GAMES, me: !!me && String(r.id) === me.id }));
+    const min = this.ladderMin();
+    const rows = this.ladderRows(min, me ? me.id : null).map(({ id: _id, ...r }) => r);
     const mine = rows.find((r) => r.me) ?? null;
     return { ok: true, rows: rows.slice(0, limit), me: mine && mine.rank > limit ? mine : null, minGames: min };
+  }
+
+  /** Your recent finished ranked games, a rating trend and your current streak. Cancelled and voided matches are left out. */
+  async rankedHistory(token: string | null, limit = 12): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    const rows = this.q(
+      "SELECT m.ts, m.outcome, m.reason, m.title, m.a, m.a_before, m.b_before, m.a_delta, m.b_delta, a.name AS an, a.avatar AS aav, a.id AS aid, b.name AS bn, b.avatar AS bav, b.id AS bid FROM matches m JOIN accounts a ON a.id = m.a JOIN accounts b ON b.id = m.b WHERE m.status = 'done' AND (m.a = ? OR m.b = ?) ORDER BY m.ts DESC LIMIT 30",
+      acc.id, acc.id,
+    ).map((m) => {
+      const mineIsA = String(m.a) === acc.id;
+      const outcome = String(m.outcome);
+      const result = outcome === "draw" ? "draw" : (mineIsA ? outcome === "a" : outcome === "b") ? "win" : "loss";
+      const before = Number(mineIsA ? m.a_before : m.b_before);
+      const delta = Number(mineIsA ? m.a_delta : m.b_delta);
+      return {
+        time: Number(m.ts),
+        result,
+        delta,
+        ratingBefore: before,
+        ratingAfter: before + delta,
+        reason: String(m.reason ?? ""),
+        title: String(m.title ?? ""),
+        opponent: {
+          name: String(mineIsA ? m.bn : m.an),
+          avatar: this.avatarOf(String(mineIsA ? m.bid : m.aid), mineIsA ? m.bav : m.aav),
+          rating: Number(mineIsA ? m.b_before : m.a_before),
+        },
+      };
+    });
+    // oldest to newest, starting from the rating before the oldest game shown
+    const recent = rows.slice(0, 20).reverse();
+    const trend = recent.length ? [recent[0].ratingBefore, ...recent.map((r) => r.ratingAfter)] : [];
+    let streak = 0;
+    for (const r of rows) {
+      if (r.result === "draw") break;
+      const dir = r.result === "win" ? 1 : -1;
+      if (streak === 0) streak = dir;
+      else if (Math.sign(streak) === dir) streak += dir;
+      else break;
+    }
+    return { ok: true, rows: rows.slice(0, limit), trend, streak };
   }
 
   // ---- the pool of lists used for ranked matches

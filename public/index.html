@@ -19,6 +19,10 @@
 
   <header class="topbar">
     <a class="brand" href="/" id="brand" aria-label="Tenfold home"><span class="brand-bulb">10</span><span class="brand-name">Tenfold</span></a>
+    <nav id="mode-pill" class="mode-pill" aria-label="Game mode">
+      <a href="#/" data-mode="fun" aria-current="page">For fun</a>
+      <a href="#/ranked" data-mode="ranked">Ranked</a>
+    </nav>
     <div class="topbar-right">
       <span id="conn" class="conn" hidden role="status">Reconnecting…</span>
       <button id="btn-leave" class="btn btn-quiet" type="button" hidden>Leave room</button>
@@ -48,29 +52,6 @@
         </form>
       </div>
 
-      <div class="home-modes">
-        <div class="mode-card">
-          <h2 class="h2">Daily challenge</h2>
-          <p class="hint">Solo and ranked. One list a day, the same for everyone, scored on speed. Free to play with a sign-in.</p>
-          <a class="btn btn-primary" id="btn-daily" href="#/daily">Play today's challenge</a>
-          <div class="home-lb">
-            <div class="tabs" role="tablist" aria-label="Daily leaderboard">
-              <button class="htab" type="button" role="tab" data-home-tab="today" aria-selected="true">Today</button>
-              <button class="htab" type="button" role="tab" data-home-tab="month" aria-selected="false">This month</button>
-            </div>
-            <div id="home-lb-body" class="lb-body"><p class="hint">Loading the leaderboard…</p></div>
-          </div>
-        </div>
-        <div class="mode-card">
-          <h2 class="h2">Ranked 1v1</h2>
-          <p class="hint">Queue for a match against someone near your rating. Win to climb, and beating a higher-rated player earns more. Needs a sign-in.</p>
-          <a class="btn btn-primary" id="btn-ranked" href="#/ranked">Find a ranked match</a>
-          <div class="home-lb">
-            <div id="home-ladder-body" class="lb-body"><p class="hint">Loading the ladder…</p></div>
-          </div>
-        </div>
-      </div>
-
       <div class="home-board" aria-hidden="true">
         <p class="sample-title">Most populous countries</p>
         <ol class="board board-sample" id="sample-board"></ol>
@@ -80,7 +61,7 @@
 
     <!-- Daily challenge (competitive, solo) -->
     <section id="screen-daily" class="screen daily" hidden>
-      <a class="back-link" href="#/" id="daily-back">Back to Tenfold</a>
+      <a class="back-link" href="#/ranked" id="daily-back">Back to Ranked</a>
       <div class="daily-head">
         <h1 class="display daily-title">Daily challenge</h1>
         <p class="lede">One list a day, the same for everyone. Solo, ranked and scored on speed. A new list starts at 00:00 UTC.</p>
@@ -157,17 +138,12 @@
     </section>
 
 
-    <!-- Ranked 1v1 -->
+    <!-- Ranked hub (needs a sign-in) -->
     <section id="screen-ranked" class="screen ranked" hidden>
-      <a class="back-link" href="#/" id="ranked-back">Back to Tenfold</a>
-      <div class="daily-head">
-        <h1 class="display daily-title">Ranked 1v1</h1>
-        <p class="lede">Queue for a match against someone near your rating. Win to climb. The better your opponent, the more a win is worth.</p>
-      </div>
-
-      <div id="ranked-signin" class="panel" hidden>
-        <h2 class="h2">Sign in to play ranked</h2>
-        <p class="hint">We use your Google, GitHub or Discord account only to show you're one person. We never see your email address or password.</p>
+      <div id="ranked-signin" class="panel signin-panel" hidden>
+        <h1 class="display daily-title">Ranked</h1>
+        <p class="lede">Climb the rating ladder in 1v1 matches, and compete on the daily challenge leaderboard. Sign in to play.</p>
+        <p class="hint">We use your Google, GitHub or Discord account only to show you're one person. We never see your email address or password, and we store only a scrambled ID plus the display name you choose.</p>
         <div id="ranked-providers" class="providers"></div>
         <p id="ranked-no-providers" class="hint" hidden>Sign-in isn't set up on this site yet.</p>
       </div>
@@ -182,30 +158,82 @@
         <button class="btn btn-primary" type="submit">Save name</button>
       </form>
 
-      <div id="ranked-profile" class="panel" hidden>
-        <div class="rating-head"><span id="rk-rating" class="rating-big">1200</span><span id="rk-prov" class="hint"></span></div>
-        <p id="rk-record" class="hint"></p>
-        <ul class="rules-list">
-          <li>Every match uses the same rules: <strong>3 lives, 20 seconds an answer, no hints</strong>. You take turns on one shared board.</li>
-          <li>Score more than your opponent to win. If they run out of lives while you're ahead, the match ends there.</li>
-          <li>Resigning or being disconnected for over a minute counts as a loss. A match that never starts changes nothing.</li>
-          <li>It's an Elo-style rating: new players move faster for their first 20 games. We run automatic fair-play checks. <a href="/rules">Read the rules</a>.</li>
-        </ul>
-        <div id="rk-idle"><button id="rk-find" class="btn btn-primary btn-big" type="button">Find a match</button></div>
-        <div id="rk-wait" hidden>
-          <p id="rk-wait-text" class="lede"></p>
-          <button id="rk-cancel" class="btn" type="button">Cancel</button>
-        </div>
-      </div>
+      <div id="ranked-hub" class="hub" hidden>
+        <div class="hub-main">
+          <section class="panel profile-card" aria-label="Your profile">
+            <div class="profile-top">
+              <div id="rk-avatar" class="profile-avatar"></div>
+              <div class="profile-id">
+                <h1 id="rk-name" class="display profile-name"></h1>
+                <p id="rk-sub" class="hint"></p>
+              </div>
+              <div class="profile-rating"><span id="rk-rating" class="rating-big">1200</span><span class="hint">rating</span></div>
+            </div>
+            <div id="rk-stats" class="stat-row"></div>
+            <div id="rk-trend" class="trend"></div>
+            <button id="rk-edit-avatar" class="btn btn-quiet btn-small" type="button" aria-expanded="false">Change picture</button>
+            <div id="rk-avatar-editor" class="avatar-editor" hidden>
+              <p class="field-label">Colour</p>
+              <div id="av-colors" class="swatches"></div>
+              <p class="field-label">Picture</p>
+              <div id="av-icons" class="swatches"></div>
+              <div class="editor-actions">
+                <button id="av-save" class="btn btn-primary btn-small" type="button">Save</button>
+                <button id="av-cancel" class="btn btn-small" type="button">Cancel</button>
+              </div>
+            </div>
+          </section>
 
-      <div id="ranked-ladder" class="panel">
-        <h2 class="h2">Ranked ladder</h2>
-        <div id="rk-ladder-body" class="lb-body"><p class="hint">Loading the ladder…</p></div>
+          <section class="panel play-card" aria-label="Ranked match">
+            <h2 class="h2">Ranked match</h2>
+            <div id="rk-idle">
+              <p class="hint">You'll be matched with someone near your rating. Win to climb. Beating a higher-rated player earns more.</p>
+              <button id="rk-find" class="btn btn-primary btn-big" type="button">Find a match</button>
+            </div>
+            <div id="rk-wait" hidden>
+              <p id="rk-wait-text" class="lede"></p>
+              <button id="rk-cancel" class="btn" type="button">Cancel</button>
+            </div>
+            <details class="how">
+              <summary>How ranked works</summary>
+              <ul class="rules-list">
+                <li>Every match uses the same rules: <strong>3 lives, 20 seconds an answer, no hints</strong>, on one shared board.</li>
+                <li>Score more than your opponent to win. If they run out of lives while you're ahead, the match ends there.</li>
+                <li>Resigning, or being disconnected for over a minute, is a loss. A match that never starts changes nothing.</li>
+                <li>It's an Elo-style rating: everyone starts at 1200, and new players move faster for their first 20 games. We run automatic fair-play checks. <a href="/rules">Read the rules</a>.</li>
+              </ul>
+            </details>
+          </section>
+
+          <section class="panel recent-card" aria-label="Recent ranked games">
+            <h2 class="h2">Recent ranked games</h2>
+            <div id="rk-recent"></div>
+          </section>
+        </div>
+
+        <aside class="hub-side">
+          <section class="panel daily-card" aria-label="Daily challenge">
+            <h2 class="h2">Daily challenge</h2>
+            <p id="rk-daily-status" class="hint"></p>
+            <a id="rk-daily-play" class="btn btn-primary" href="#/daily">Play today's challenge</a>
+            <div class="tabs" role="tablist" aria-label="Daily leaderboard">
+              <button class="htab" type="button" role="tab" data-daily-tab="today" aria-selected="true">Today</button>
+              <button class="htab" type="button" role="tab" data-daily-tab="month" aria-selected="false">This month</button>
+            </div>
+            <div id="rk-daily-board" class="lb-body"></div>
+          </section>
+
+          <section class="panel ladder-card" aria-label="Ranked ladder">
+            <h2 class="h2">Ranked ladder</h2>
+            <div id="rk-ladder-body" class="lb-body"></div>
+          </section>
+        </aside>
       </div>
 
       <div id="ranked-account" class="account-row" hidden>
         <span>Signed in as <strong id="rk-acct-name"></strong></span>
         <button id="rk-signout" class="btn btn-quiet" type="button">Sign out</button>
+        <button id="rk-delete" class="btn btn-quiet" type="button">Delete my account</button>
       </div>
       <p class="legal-links"><a href="/rules">Rules, fair play and privacy</a></p>
     </section>
