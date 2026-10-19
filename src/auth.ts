@@ -62,6 +62,13 @@ export function providers(env: Env): Provider[] {
       scope: "openid", clientId: "mock-client", clientSecret: "mock-secret",
       pickId: (j) => (j?.sub ? String(j.sub) : null),
     });
+    // A second fake provider so account linking can be tested.
+    out.push({
+      id: "mock2", label: "Second test provider",
+      authUrl: `${base}/authorize`, tokenUrl: `${base}/token`, userUrl: `${base}/userinfo`,
+      scope: "openid", clientId: "mock-client", clientSecret: "mock-secret",
+      pickId: (j) => (j?.sub ? String(j.sub) : null),
+    });
   }
   return out;
 }
@@ -138,13 +145,13 @@ const redirect = (to: string, cookies: string[] = []): Response => {
   return new Response(null, { status: 302, headers: h });
 };
 
-export async function startSignIn(request: Request, env: Env, p: Provider): Promise<Response> {
+export async function startSignIn(request: Request, env: Env, p: Provider, linking = false): Promise<Response> {
   const url = new URL(request.url);
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
-  const next = url.searchParams.get("next") === "ranked" ? "ranked" : "daily";
-  const signed = await sign(env, { s: state, v: verifier, p: p.id, t: Date.now(), n: next });
+  const next = linking ? "me" : url.searchParams.get("next") === "ranked" ? "ranked" : "daily";
+  const signed = await sign(env, { s: state, v: verifier, p: p.id, t: Date.now(), n: next, l: linking ? 1 : 0 });
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -164,10 +171,10 @@ export async function finishSignIn(
   request: Request,
   env: Env,
   p: Provider,
-): Promise<{ ok: true; id: string; next: string } | { ok: false; response: Response }> {
+): Promise<{ ok: true; id: string; next: string; link: boolean } | { ok: false; response: Response }> {
   const url = new URL(request.url);
-  const saved = await verify<{ s: string; v: string; p: string; t: number; n?: string }>(env, parseCookies(request)[OAUTH_COOKIE]);
-  const next = saved?.n === "ranked" ? "ranked" : "daily";
+  const saved = await verify<{ s: string; v: string; p: string; t: number; n?: string; l?: number }>(env, parseCookies(request)[OAUTH_COOKIE]);
+  const next = saved?.n === "ranked" ? "ranked" : saved?.n === "me" ? "me" : "daily";
   const back = (code: string) => ({
     ok: false as const,
     response: redirect(`/?autherror=${code}#/${next}`, [cookie(url, OAUTH_COOKIE, "", 0)]),
@@ -197,7 +204,7 @@ export async function finishSignIn(
     const userRes = await fetch(p.userUrl, { headers: { authorization: `Bearer ${tokens.access_token}`, accept: "application/json", "user-agent": "tenfold" } });
     const sub = p.pickId(await userRes.json());
     if (!userRes.ok || !sub) return back("user");
-    return { ok: true, id: await accountId(env, p.id, sub), next };
+    return { ok: true, id: await accountId(env, p.id, sub), next, link: saved.l === 1 };
   } catch (err) {
     console.error("sign-in failed:", err);
     return back("network");
@@ -206,3 +213,6 @@ export async function finishSignIn(
 
 export const finishRedirect = (url: URL, sessionToken: string, next = "daily"): Response =>
   redirect(`/#/${next === "ranked" ? "ranked" : "daily"}`, [cookie(url, SESSION_COOKIE, sessionToken, 30 * 24 * 60 * 60), cookie(url, OAUTH_COOKIE, "", 0)]);
+
+/** After linking an account: back to the profile page with the outcome in the query string. */
+export const linkRedirect = (url: URL, query: string): Response => redirect(`/?${query}#/me`, [cookie(url, OAUTH_COOKIE, "", 0)]);

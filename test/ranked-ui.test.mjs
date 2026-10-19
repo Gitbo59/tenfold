@@ -5,7 +5,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0; const ok = (c, m) => { console.log(c ? "  PASS" : "  FAIL", m); if (!c) failures++; };
 const errors = [];
 const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8").replace(/<link[^>]*fonts[^>]*>/g, "").replace(/<script src="[^"]*" defer><\/script>/g, "");
-const src = ["app.js", "daily.js", "ranked.js"].map((f) => fs.readFileSync(new URL("../public/" + f, import.meta.url), "utf8"));
+const src = ["app.js", "daily.js", "ranked.js", "profile.js"].map((f) => fs.readFileSync(new URL("../public/" + f, import.meta.url), "utf8"));
 const NodeWS = globalThis.WebSocket;
 
 class Browser {
@@ -61,23 +61,16 @@ ok(await ui.until(() => !ui.$("#ranked-hub").hidden && ui.$("#ranked-signin").hi
 ok(ui.$("#rk-name").textContent === "UiRanked" && ui.$("#rk-rating").textContent === "1200" && /Provisional rating/.test(ui.$("#rk-sub").textContent), "profile: name, 1200 rating, provisional");
 ok(!!ui.$("#rk-avatar svg.av") && /hsl\(\d+/.test(ui.$("#rk-avatar").innerHTML), "a profile picture is shown from the start (a default avatar, no photo needed)");
 ok(ui.$$("#rk-stats .stat").length === 5 && /Peak rating/.test(ui.$("#rk-stats").textContent) && /Win rate/.test(ui.$("#rk-stats").textContent) && /Current streak/.test(ui.$("#rk-stats").textContent), "stats: peak, games, win rate, record, streak");
-ok(/Play a few matches to see your rating trend/.test(ui.$("#rk-trend").textContent) && /No ranked games yet/.test(ui.$("#rk-recent").textContent), "empty states explain what will appear");
+ok(/Play a few matches to see a rating trend/.test(ui.$("#rk-trend").textContent) && /No ranked games yet/.test(ui.$("#rk-recent").textContent), "empty states explain what will appear");
 ok(await ui.until(() => /Today's list is ready/.test(ui.$("#rk-daily-status").textContent)) && ui.$("#rk-daily-play").getAttribute("href") === "#/daily", "the daily challenge card shows today's status and a Play link");
 ok(await ui.until(() => /Nobody has finished yet/.test(ui.$("#rk-daily-board").textContent)), "and the daily challenge leaderboard (empty on day one)");
 ok(await ui.until(() => /Nobody has a rating yet/.test(ui.$("#rk-ladder-body").textContent)), "plus the ranked ladder");
 ok(ui.$("#mode-pill a[aria-current=page]").dataset.mode === "ranked", "the pill shows Ranked");
 
-console.log("choosing a profile picture");
-const before = ui.$("#rk-avatar").innerHTML;
-ui.click(ui.$("#rk-edit-avatar"));
-ok(!ui.$("#rk-avatar-editor").hidden && ui.$$("#av-colors .swatch").length === 12 && ui.$$("#av-icons .swatch").length === 12, "the editor offers 12 colours and 12 pictures");
-ui.click(ui.$('#av-colors [data-color="3"]')); ui.click(ui.$('#av-icons [data-icon="5"]'));
-ok(/hsl\(150 /.test(ui.$("#rk-avatar").innerHTML) && ui.$('#av-colors [data-color="3"]').getAttribute("aria-pressed") === "true", "picking updates the preview straight away");
-ui.click(ui.$("#av-cancel"));
-ok(ui.$("#rk-avatar").innerHTML === before && ui.$("#rk-avatar-editor").hidden, "Cancel puts the old picture back");
-ui.click(ui.$("#rk-edit-avatar")); ui.click(ui.$('#av-colors [data-color="3"]')); ui.click(ui.$('#av-icons [data-icon="5"]')); ui.click(ui.$("#av-save"));
-ok(await ui.until(() => /hsl\(150 /.test(ui.$("#rk-avatar").innerHTML) && ui.$("#rk-avatar-editor").hidden), "Save keeps it");
-ok((await me.json("/api/me")).avatar === "3:5", "and it is stored on the account as just two small numbers");
+console.log("the hub links to the profile screen; account buttons moved there");
+ok(ui.$("#rk-name").getAttribute("href") === "#/me" && ui.$("#rk-edit-profile").getAttribute("href") === "#/me" && ui.$(".profile-link[aria-label]").getAttribute("href") === "#/me", "your picture, name and an 'edit profile' button all open your profile");
+ok(!ui.$("#rk-signout") && !ui.$("#rk-delete") && !ui.$("#rk-edit-avatar") && !ui.$("#ranked-account"), "sign out, delete and the picture editor are no longer on the hub");
+ok(!!ui.$("#fr-add-form") && /No friends yet/.test(ui.$("#fr-list").textContent), "the hub has a Friends card (empty to start with)");
 
 console.log("the queue");
 ui.click(ui.$("#rk-find"));
@@ -122,14 +115,13 @@ const rows = ui.$$("#rk-ladder-body tbody tr");
 ok(rows.length === 2 && /UiRanked/.test(rows[0].textContent) && /1220/.test(rows[0].textContent) && /Opp/.test(rows[1].textContent) && /1180/.test(rows[1].textContent) && rows.every((r) => r.querySelector("svg.av")) && /\(you\)/.test(rows[0].textContent), "the ladder lists both with avatars, best first, and marks me");
 oppWs.close();
 
-console.log("daily challenge from the hub, and signing out");
-ui.click(ui.$("#rk-daily-play").cloneNode ? ui.$("#rk-daily-play") : ui.$("#rk-daily-play"));
+console.log("daily challenge from the hub");
+ok(ui.$$("#rk-ladder-body a.plink")[0].getAttribute("href") === "#/u/UiRanked" && ui.$$("#rk-ladder-body a.plink")[1].getAttribute("href") === "#/u/Opp", "names on the ladder link to those players' profiles");
+ok(ui.$("#rk-recent a.plink").getAttribute("href") === "#/u/Opp", "so do opponents in recent games");
 ui.w.location.hash = "#/daily";
 ok(await ui.until(() => !ui.$("#screen-daily").hidden), "the Play link opens the daily challenge");
 ui.w.location.hash = "#/ranked";
 ok(await ui.until(() => !ui.$("#screen-ranked").hidden && ui.$("#rk-rating").textContent === "1220"), "and Back to Ranked returns to the hub");
-ui.click(ui.$("#rk-signout"));
-ok(await ui.until(() => !ui.$("#ranked-signin").hidden && ui.$("#ranked-hub").hidden), "signing out hides everything behind the login again");
 
 console.log("home page stays original");
 {

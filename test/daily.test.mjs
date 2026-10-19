@@ -66,7 +66,7 @@ const noOrigin = await alice.json("/api/me/name", { method: "POST", headers: { "
 ok(noOrigin.status === 403, "changing data without a same-origin header is refused (cross-site protection)");
 
 console.log("display names");
-ok((await alice.post("/api/daily/start")).error?.includes("display name"), "you can't play before choosing a name");
+ok((await alice.post("/api/daily/start")).error?.includes("username"), "you can't play before choosing a name");
 for (const bad of ["a", "<b>x</b>", "Admin", "x".repeat(30), "  "]) { const r = await alice.post("/api/me/name", { name: bad }); if (!r.error) ok(false, "accepted bad name " + bad); }
 ok(true, "too-short, markup, reserved and too-long names are all refused");
 ok((await alice.post("/api/me/name", { name: "Alice A" })).name === "Alice A", "a valid name is accepted");

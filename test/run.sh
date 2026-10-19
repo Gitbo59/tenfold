@@ -30,6 +30,8 @@ start 8787 9229; run "Game rules (turns, lives, timers, scoring)" node test/game
 start 8787 9229; run "Features (hints, reports, difficulty, cache, budget caps)" node test/features.test.mjs; stop_all
 start 8787 9229; run "Daily challenge (accounts, sign-in, scoring, fair-play checks)" node test/daily.test.mjs; stop_all
 start 8787 9229; run "Ranked 1v1 (queue, ratings, forfeits, safeguards)" node test/ranked.test.mjs; stop_all
+start 8787 9229; run "Friends, profiles and linked accounts" node test/friends.test.mjs; stop_all
+start 8787 9229; run "Profile, friends and player screens (simulated browser)" node test/profile-ui.test.mjs; stop_all
 start 8787 9229; run "Ranked screens (simulated browser)" node test/ranked-ui.test.mjs; stop_all
 start 8787 9229; run "Daily challenge screens (simulated browser)" node test/daily-ui.test.mjs; stop_all
 start 8787 9229; run "Browser UI (simulated)" node test/ui.test.mjs; stop_all

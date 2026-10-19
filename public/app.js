@@ -78,12 +78,12 @@
     return key in pending ? pending[key] : serverVal;
   }
 
-  const screens = ["home", "connecting", "lobby", "generating", "game", "daily", "ranked"];
+  const screens = ["home", "connecting", "lobby", "generating", "game", "daily", "ranked", "me", "player"];
   function show(name) {
     for (const s of screens) $(`#screen-${s}`).hidden = s !== name;
-    $("#btn-leave").hidden = name === "home" || name === "daily" || name === "ranked";
+    $("#btn-leave").hidden = ["home", "daily", "ranked", "me", "player"].includes(name);
     // The For fun / Ranked switch shows on the main pages and hides while you're in a room.
-    $("#mode-pill").hidden = !["home", "ranked", "daily"].includes(name);
+    $("#mode-pill").hidden = !["home", "ranked", "daily", "me", "player"].includes(name);
     for (const a of $$("#mode-pill a")) {
       if (a.dataset.mode === (name === "home" ? "fun" : "ranked")) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
@@ -799,11 +799,23 @@
     show("ranked");
     window.dispatchEvent(new Event("tf:ranked"));
   }
-  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, enterRoom: (c) => enterRoom(c), avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
+  function openMe() {
+    if (code) leaveRoom(true);
+    show("me");
+    window.dispatchEvent(new Event("tf:me"));
+  }
+  function openPlayer() {
+    if (code) leaveRoom(true);
+    show("player");
+    window.dispatchEvent(new Event("tf:player"));
+  }
+  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
   function route() {
     if (location.hash.startsWith("#/daily")) openDaily();
     else if (location.hash.startsWith("#/ranked")) openRanked();
-    else if (!code && (!$("#screen-daily").hidden || !$("#screen-ranked").hidden)) show("home");
+    else if (location.hash.startsWith("#/me")) openMe();
+    else if (location.hash.startsWith("#/u/")) openPlayer();
+    else if (!code && ["daily", "ranked", "me", "player"].some((n) => !$(`#screen-${n}`).hidden)) show("home");
   }
   window.addEventListener("hashchange", route);
 
@@ -817,6 +829,10 @@
     openDaily();
   } else if (location.hash.startsWith("#/ranked")) {
     openRanked();
+  } else if (location.hash.startsWith("#/me")) {
+    openMe();
+  } else if (location.hash.startsWith("#/u/")) {
+    openPlayer();
   } else if (saved && myName()) {
     fetch(`/api/rooms/${saved}`).then((r) => (r.ok ? enterRoom(saved) : (sessionStorage.removeItem("tf_room"), show("home")))).catch(() => show("home"));
   } else {

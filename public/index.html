@@ -75,10 +75,10 @@
       </div>
 
       <form id="daily-name-form" class="panel" hidden>
-        <h2 class="h2">Choose a display name</h2>
-        <p class="hint">It appears on the leaderboard. Please don't use your real name or an email address.</p>
+        <h2 class="h2">Choose a username</h2>
+        <p class="hint">It appears on the leaderboard and others can find you by it. Please don't use your real name or an email address.</p>
         <label class="field">
-          <span class="field-label">Display name (3 to 16 characters)</span>
+          <span class="field-label">Username (3 to 16 characters)</span>
           <input id="daily-name" maxlength="16" autocomplete="off" required>
         </label>
         <button class="btn btn-primary" type="submit">Save name</button>
@@ -125,9 +125,7 @@
       </div>
 
       <div id="daily-account" class="account-row" hidden>
-        <span>Signed in as <strong id="acct-name"></strong></span>
-        <button id="btn-signout" class="btn btn-quiet" type="button">Sign out</button>
-        <button id="btn-delete" class="btn btn-quiet" type="button">Delete my account</button>
+        <span>Signed in as <a id="acct-name" class="plink" href="#/me"></a></span>
       </div>
       <p class="legal-links"><a href="/rules">Rules, fair play and privacy</a></p>
 
@@ -149,10 +147,10 @@
       </div>
 
       <form id="ranked-name-form" class="panel" hidden>
-        <h2 class="h2">Choose a display name</h2>
-        <p class="hint">It appears on the ladder and in matches. Please don't use your real name or an email address.</p>
+        <h2 class="h2">Choose a username</h2>
+        <p class="hint">It appears on the ladder and in matches, and friends find you by it. Please don't use your real name or an email address.</p>
         <label class="field">
-          <span class="field-label">Display name (3 to 16 characters)</span>
+          <span class="field-label">Username (3 to 16 characters)</span>
           <input id="ranked-name" maxlength="16" autocomplete="off" required>
         </label>
         <button class="btn btn-primary" type="submit">Save name</button>
@@ -162,26 +160,16 @@
         <div class="hub-main">
           <section class="panel profile-card" aria-label="Your profile">
             <div class="profile-top">
-              <div id="rk-avatar" class="profile-avatar"></div>
+              <a class="profile-link" href="#/me" aria-label="Open your profile"><span id="rk-avatar" class="profile-avatar"></span></a>
               <div class="profile-id">
-                <h1 id="rk-name" class="display profile-name"></h1>
+                <h1 class="display profile-name"><a id="rk-name" class="profile-link" href="#/me"></a></h1>
                 <p id="rk-sub" class="hint"></p>
               </div>
               <div class="profile-rating"><span id="rk-rating" class="rating-big">1200</span><span class="hint">rating</span></div>
             </div>
             <div id="rk-stats" class="stat-row"></div>
             <div id="rk-trend" class="trend"></div>
-            <button id="rk-edit-avatar" class="btn btn-quiet btn-small" type="button" aria-expanded="false">Change picture</button>
-            <div id="rk-avatar-editor" class="avatar-editor" hidden>
-              <p class="field-label">Colour</p>
-              <div id="av-colors" class="swatches"></div>
-              <p class="field-label">Picture</p>
-              <div id="av-icons" class="swatches"></div>
-              <div class="editor-actions">
-                <button id="av-save" class="btn btn-primary btn-small" type="button">Save</button>
-                <button id="av-cancel" class="btn btn-small" type="button">Cancel</button>
-              </div>
-            </div>
+            <a id="rk-edit-profile" class="btn btn-small" href="#/me">View and edit profile</a>
           </section>
 
           <section class="panel play-card" aria-label="Ranked match">
@@ -212,6 +200,23 @@
         </div>
 
         <aside class="hub-side">
+          <section class="panel friends-card" aria-label="Friends">
+            <h2 class="h2">Friends <span id="fr-count" class="count"></span></h2>
+            <form id="fr-add-form" class="fr-add" autocomplete="off">
+              <input id="fr-add-name" maxlength="16" placeholder="Add a friend by username" aria-label="Friend's username">
+              <button class="btn btn-small btn-primary" type="submit">Send request</button>
+            </form>
+            <div id="fr-requests" hidden>
+              <h3 class="h3">Requests</h3>
+              <ul id="fr-incoming" class="fr-list"></ul>
+            </div>
+            <ul id="fr-list" class="fr-list"></ul>
+            <div id="fr-sent" hidden>
+              <h3 class="h3">Sent</h3>
+              <ul id="fr-outgoing" class="fr-list"></ul>
+            </div>
+          </section>
+
           <section class="panel daily-card" aria-label="Daily challenge">
             <h2 class="h2">Daily challenge</h2>
             <p id="rk-daily-status" class="hint"></p>
@@ -230,12 +235,78 @@
         </aside>
       </div>
 
-      <div id="ranked-account" class="account-row" hidden>
-        <span>Signed in as <strong id="rk-acct-name"></strong></span>
-        <button id="rk-signout" class="btn btn-quiet" type="button">Sign out</button>
-        <button id="rk-delete" class="btn btn-quiet" type="button">Delete my account</button>
-      </div>
       <p class="legal-links"><a href="/rules">Rules, fair play and privacy</a></p>
+    </section>
+
+    <!-- Your profile (settings) -->
+    <section id="screen-me" class="screen me" hidden>
+      <a class="back-link" href="#/ranked">Back to Ranked</a>
+      <div class="daily-head">
+        <h1 class="display daily-title">Your profile</h1>
+        <p id="me-sub" class="lede"></p>
+      </div>
+      <div class="me-grid">
+        <section class="panel" aria-label="Profile picture">
+          <h2 class="h2">Profile picture</h2>
+          <div class="me-pic-row">
+            <div id="me-avatar" class="profile-avatar"></div>
+            <p class="hint">Pick a colour and a picture. We never store photos.</p>
+          </div>
+          <div class="avatar-editor">
+            <p class="field-label">Colour</p>
+            <div id="av-colors" class="swatches"></div>
+            <p class="field-label">Picture</p>
+            <div id="av-icons" class="swatches"></div>
+            <div class="editor-actions">
+              <button id="av-save" class="btn btn-primary btn-small" type="button">Save picture</button>
+            </div>
+          </div>
+        </section>
+
+        <form id="me-name-form" class="panel" aria-label="Username" autocomplete="off">
+          <h2 class="h2">Username</h2>
+          <p class="hint">Unique across the whole site. Friends find you by it, and it appears on leaderboards and in matches. You can change it once a week.</p>
+          <label class="field">
+            <span class="field-label">Username (3 to 16 characters)</span>
+            <input id="me-name" maxlength="16" required>
+          </label>
+          <p id="me-name-note" class="hint"></p>
+          <button class="btn btn-primary" type="submit">Save username</button>
+        </form>
+
+        <section class="panel" aria-label="Linked accounts">
+          <h2 class="h2">Linked accounts</h2>
+          <p class="hint">The ways you can sign in to this account. From each one we only ever learn a scrambled ID, never your email address or password.</p>
+          <ul id="me-identities" class="identities"></ul>
+        </section>
+
+        <section class="panel" aria-label="Privacy">
+          <h2 class="h2">Privacy</h2>
+          <label class="toggle-row">
+            <span class="toggle-text"><strong>Allow friend requests</strong><span class="hint">When off, nobody can send you a request.</span></span>
+            <input id="me-allow" class="switch" type="checkbox" role="switch">
+          </label>
+          <label class="toggle-row">
+            <span class="toggle-text"><strong>Public profile</strong><span class="hint">When off, only your friends see your stats and recent games. Everyone still sees your username, picture and rating.</span></span>
+            <input id="me-public" class="switch" type="checkbox" role="switch">
+          </label>
+        </section>
+
+        <section class="panel" aria-label="Account">
+          <h2 class="h2">Account</h2>
+          <p class="hint">Member since <span id="me-since"></span>. <a href="/rules">Rules and privacy</a></p>
+          <div class="me-actions">
+            <button id="me-signout" class="btn" type="button">Sign out</button>
+            <button id="me-delete" class="btn btn-danger" type="button">Delete my account</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- Another player's profile -->
+    <section id="screen-player" class="screen player" hidden>
+      <a class="back-link" href="#/ranked">Back to Ranked</a>
+      <div id="pl-body"></div>
     </section>
 
     <!-- Connecting -->
@@ -422,5 +493,6 @@
   <script src="/app.js" defer></script>
   <script src="/daily.js" defer></script>
   <script src="/ranked.js" defer></script>
+  <script src="/profile.js" defer></script>
 </body>
 </html>

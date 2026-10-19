@@ -74,7 +74,7 @@ ok((await anon.post("/api/ranked/queue")).httpStatus === 401 && (await anon.json
 ok((await anon.json("/api/ranked/ladder")).httpStatus === 200, "the ladder is public");
 const [p1, p2, p3, p4, p5, p6, p7, p8] = await Promise.all(["Pia", "Quin", "Rex", "Sol", "Tia", "Uma", "Vik", "Wen"].map((n, i) => new Browser().player("rk-" + n, n)));
 const noName = new Browser(); await noName.req("/api/auth/mock/start").then(async (s) => { const a = await noName.req(s.headers.get("location") + "&as=noname"); await noName.req(a.headers.get("location")); });
-ok((await noName.post("/api/ranked/queue")).error?.includes("display name"), "you need a display name first");
+ok((await noName.post("/api/ranked/queue")).error?.includes("username"), "you need a display name first");
 const base = await aiCalls();
 
 console.log("the queue");

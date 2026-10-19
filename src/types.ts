@@ -60,4 +60,8 @@ export interface Env {
   RANKED_WIDEN_PER_SEC?: string | number;
   /** Games needed before a player shows on the public ladder (default 3). */
   RANKED_LADDER_MIN_GAMES?: string | number;
+
+  // ---- Profiles ----
+  /** Days between username changes (default 7). The first username is free to set. */
+  NAME_CHANGE_DAYS?: string | number;
 }

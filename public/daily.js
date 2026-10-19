@@ -221,7 +221,7 @@
   function tableHtml(rows, me, month) {
     if (!rows.length) return '<p class="hint">Nobody has finished yet. Be the first.</p>';
     const row = (r) =>
-      `<tr class="${r.me ? "me" : ""}"><td class="rk">${r.rank}</td><td><span class="who-cell">${r.avatar ? T.avatar(r.avatar, 24) : ""}${esc(r.name)}${r.me ? " (you)" : ""}</span></td><td class="num">${r.score}</td><td class="num">${month ? `${r.days} ${r.days === 1 ? "day" : "days"}` : `${r.found}/10`}</td><td class="num">${msText(r.ms)}</td></tr>`;
+      `<tr class="${r.me ? "me" : ""}"><td class="rk">${r.rank}</td><td><span class="who-cell">${r.avatar ? T.avatar(r.avatar, 24) : ""}<a class="plink" href="#/u/${encodeURIComponent(r.name)}">${esc(r.name)}</a>${r.me ? " (you)" : ""}</span></td><td class="num">${r.score}</td><td class="num">${month ? `${r.days} ${r.days === 1 ? "day" : "days"}` : `${r.found}/10`}</td><td class="num">${msText(r.ms)}</td></tr>`;
     return `<table class="lb"><thead><tr><th>#</th><th>Player</th><th class="num">Points</th><th class="num">${month ? "Played" : "Found"}</th><th class="num">Time</th></tr></thead><tbody>${rows.map(row).join("")}${me ? row(me) : ""}</tbody></table>`;
   }
 
@@ -264,21 +264,6 @@
     $("#daily-start").disabled = false;
     if (r.error) return toast(r.error, "error");
     setState(r);
-  });
-
-  $("#btn-signout").addEventListener("click", async () => {
-    await api("/api/auth/logout", {});
-    state = null;
-    refresh();
-  });
-
-  $("#btn-delete").addEventListener("click", async () => {
-    if (!confirm("Delete your account and all your results? If you've already played today you won't be able to play again until tomorrow.")) return;
-    const r = await api("/api/me/delete", {});
-    if (r.error) return toast(r.error, "error");
-    toast("Your account has been deleted.");
-    state = null;
-    refresh();
   });
 
   // ------------------------------------------------------------------ entry

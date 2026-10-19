@@ -59,7 +59,7 @@ console.log("signed out");
   const p = await page("#/daily", null);
   ok(await p.until(() => !p.$("#daily-signin").hidden), "visitors see the sign-in panel");
   const b = p.$$("#provider-buttons a");
-  ok(b.length === 1 && b[0].getAttribute("href") === "/api/auth/mock/start" && /Continue with Test provider/.test(b[0].textContent), "one button per configured provider");
+  ok(b.length === 2 && b[0].getAttribute("href") === "/api/auth/mock/start" && /Continue with Test provider/.test(b[0].textContent), "one button per configured provider (the test setup has two)");
   ok(/never see your email address or password/.test(p.$("#daily-signin").textContent), "the privacy promise is stated where people sign in");
   ok(p.$("#daily-guess-form").hidden && p.$("#daily-play").hidden && p.$("a[href='/rules']"), "no play controls, and the rules link is present");
   ok(!p.$("#daily-board").hidden, "the leaderboard is public");
@@ -109,14 +109,10 @@ await fetch(BASE + "/api/admin/daily", { method: "POST", headers: ADMIN, body: J
 p.click(p.$$(".tab")[2]);
 ok(await p.until(() => p.$$("#lb-body .reveal-list li").length === 10 && /Old 1/.test(p.$("#lb-body").textContent)), "the yesterday tab reveals the whole list");
 
-console.log("account");
-p.click(p.$("#btn-signout"));
-ok(await p.until(() => !p.$("#daily-signin").hidden && p.$("#daily-account").hidden), "sign out returns to the sign-in panel");
-const cookie2 = await signIn("ui-sub-2"); const q = await page("#/daily", cookie2);
-await q.until(() => !q.$("#daily-name-form").hidden); q.$("#daily-name").value = "Deleter"; q.submit(q.$("#daily-name-form")); await q.until(() => !q.$("#daily-ready").hidden);
-q.click(q.$("#btn-delete"));
-ok(await q.until(() => !q.$("#daily-signin").hidden), "deleting your account signs you out of the page");
-const after = await fetch(BASE + "/api/me", { headers: { cookie: cookie2() } }).then((r) => r.json());
-ok(after.signedIn === false, "and the server no longer knows the account");
+console.log("account links");
+ok(!p.$("#btn-signout") && !p.$("#btn-delete"), "sign out and delete are no longer on the daily page");
+ok(p.$("#acct-name").getAttribute("href") === "#/me" && p.$("#acct-name").textContent === "UI Tester", "the signed-in name links to your profile");
+p.click(p.$$(".tab")[0]);
+ok(await p.until(() => p.$$("#lb-body a.plink").length > 0) && p.$$("#lb-body a.plink")[0].getAttribute("href").startsWith("#/u/"), "leaderboard names link to player profiles");
 ok(errors.length === 0, "no script errors" + (errors.length ? ": " + errors.join(" | ") : ""));
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nDAILY UI CHECKS PASSED"); process.exit(failures ? 1 : 0);

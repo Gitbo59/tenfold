@@ -69,7 +69,10 @@ A pill at the top centre switches between them (it hides while you're inside a g
   - **Ranked match:** the queue button, and a short "how ranked works" panel.
   - **Recent ranked games:** each opponent (with their picture and rating), the result, how many points you gained or lost, your rating afterwards, the list that was played and how it ended.
   - **Daily challenge:** today's status (not started, in progress, or your score and place), a button to play, and the daily and monthly leaderboards.
+  - **Friends:** add a friend by username, accept or decline requests, and see what your friends are up to (looking for a match, or in one).
   - **Ranked ladder:** the top 20 by rating, with your own row added if you're further down.
+
+Clicking your picture or name on the hub opens **your profile** (`#/me`), and clicking anyone else's name anywhere (ladder, leaderboards, recent games, friends) opens **their profile** (`#/u/Username`).
 
 **Profile pictures** are chosen from a fixed set: 12 colours and 12 pictures (stable defaults are assigned until you pick). They are stored as two small numbers, never as photos or links to photos. That is deliberate: sign-in providers' profile photos are personal data, and keeping them out of your database fits the "nothing sensitive to look after" design. If you later want provider photos, they could be added as an opt-in (GitHub and Discord already send an avatar link in the sign-in response, Google needs an extra permission), but you would then be storing a link to someone's photo.
 
@@ -169,6 +172,21 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d
 
 Free-tier note: while someone waits in the queue their page asks the server for an update every 1.5 seconds, about 40 requests a minute. Worker requests are free up to 100,000 a day, so that's roughly 2,500 waiting-minutes a day across everyone. Deleting an account removes its rating and match history. The privacy section of `/rules` covers this.
 
+## Profiles, friends and linked accounts
+
+**Your profile screen** (`#/me`) holds everything you can configure, plus **Sign out** and **Delete my account** (they live only here now):
+
+- **Username:** globally unique, ignoring case, 3 to 16 letters, numbers, spaces, hyphens or underscores. It's the same name that shows on leaderboards and in matches, and what friends search for. The first one is free to set; after you change it there's a cooldown (7 days, set by `NAME_CHANGE_DAYS`) so names can't be swapped to confuse people. Releasing a name lets someone else claim it.
+- **Profile picture:** the colour and picture editor.
+- **Linked accounts:** every way you can sign in to the account. You can link a second provider (Google, GitHub, Discord) so any of them gets you into the same account, and unlink one at any time as long as at least one remains. Linking uses the same callback addresses you already registered for sign-in, so there's nothing new to set up with the providers. An account can't be merged with another one: if a provider account is already used elsewhere, linking is refused with an explanation. Accounts created before linking existed show their first method as "Original sign-in" until they next sign in.
+- **Privacy:** turn friend requests off, and choose whether your full profile (stats and recent games) is public or friends-only. Everyone can always see your username, picture and rating.
+
+**Friends:** send a request by username from the hub's Friends card or from someone's profile page. They can accept or decline; you can cancel a request you sent, and remove a friend at any time. If two people ask each other it becomes a friendship straight away. A declined request is quietly remembered for a week so the same person can't keep re-sending it, and the person who declined isn't told anything. Limits: 25 pending requests and 100 friends each.
+
+**Other people's profiles** show their picture, username, rating, ladder position, member-since month, record, streak, rating trend and last five ranked games. Linked accounts and anything else private are never shown. A player with a friends-only profile shows strangers only their username, picture and rating.
+
+Deleting an account removes its username, rating, matches, daily results, linked sign-in methods and every friendship and request.
+
 ## Staying inside the free tier
 
 **The one rule: keep the account on the Workers Free plan.** On Free there is no billing at all. When a daily limit is reached, calls simply fail until 00:00 UTC. If you upgrade to Workers Paid, or use paid AI providers, things *can* cost money (Workers AI beyond the free 10,000 neurons/day is $0.011 per 1,000).
@@ -220,7 +238,7 @@ Starts a local copy of the app with a fake AI server (no login, no spend) and ru
 ## Project layout
 
 ```
-public/            Static front end (index.html, style.css, app.js, daily.js, ranked.js, rules.html)
+public/            Static front end (index.html, style.css, app.js, daily.js, ranked.js, profile.js, rules.html)
 src/index.ts       Worker: routes, per-connection hashing, room-creation limit, admin
 src/room.ts        Durable Object per room: lobby, turns, timers, hints, reports, scoring
 src/quota.ts       Global Durable Object: AI budget, limits, list cache, report log

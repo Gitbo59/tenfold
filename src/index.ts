@@ -1,5 +1,5 @@
 import { Arena } from "./arena";
-import { SESSION_COOKIE, cookie, finishRedirect, finishSignIn, parseCookies, providers, startSignIn } from "./auth";
+import { SESSION_COOKIE, cookie, finishRedirect, finishSignIn, linkRedirect, parseCookies, providers, startSignIn } from "./auth";
 import { Quota } from "./quota";
 import { Room } from "./room";
 import type { Env } from "./types";
@@ -13,7 +13,7 @@ const roomStub = (env: Env, code: string) => env.ROOM.get(env.ROOM.idFromName(co
 const quotaStub = (env: Env) => env.QUOTA.get(env.QUOTA.idFromName("global"));
 /** A plain description of the Arena's methods. (The generated RPC types are too deep for the compiler here.) */
 interface ArenaApi {
-  signIn(idHash: string): Promise<{ ok: true; token: string; name: string | null } | { ok: false; status: number; error: string }>;
+  signIn(idHash: string, provider: string): Promise<{ ok: true; token: string; name: string | null } | { ok: false; status: number; error: string }>;
   me(token: string | null): Promise<{ signedIn: boolean; name: string | null; avatar: string | null }>;
   setAvatar(token: string | null, color: unknown, icon: unknown): Promise<any>;
   rankedHistory(token: string | null, limit?: number): Promise<any>;
@@ -33,6 +33,13 @@ interface ArenaApi {
   adminReview(id: number, action: string): Promise<any>;
   adminBan(name: string, banned: boolean): Promise<any>;
   maintenance(): Promise<void>;
+  linkIdentity(token: string | null, idHash: string, provider: string): Promise<any>;
+  unlinkIdentity(token: string | null, provider: string): Promise<any>;
+  myProfile(token: string | null): Promise<any>;
+  updateSettings(token: string | null, settings: unknown): Promise<any>;
+  playerProfile(token: string | null, name: string): Promise<any>;
+  friendsList(token: string | null): Promise<any>;
+  friendAction(token: string | null, action: string, name: string): Promise<any>;
   identify(token: string | null): Promise<{ id: string; name: string | null } | null>;
   queueJoin(token: string | null): Promise<any>;
   queueStatus(token: string | null): Promise<any>;
@@ -85,14 +92,25 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
   if (path === "/api/auth/providers") {
     return json({ providers: providers(env).map((p) => ({ id: p.id, label: p.label })) });
   }
-  const auth = path.match(/^\/api\/auth\/([a-z]+)\/(start|callback)$/);
+  const auth = path.match(/^\/api\/auth\/([a-z0-9]+)\/(start|callback)$/);
   if (auth && request.method === "GET") {
     const provider = providers(env).find((p) => p.id === auth[1]);
     if (!provider) return json({ error: "That sign-in option isn't available." }, 404);
-    if (auth[2] === "start") return startSignIn(request, env, provider);
+    if (auth[2] === "start") {
+      if (url.searchParams.get("link") === "1") {
+        // Linking adds a sign-in method to the account you're already in.
+        if (!(await arena.me(token)).signedIn) return Response.redirect(`${url.origin}/?autherror=state#/ranked`, 302);
+        return startSignIn(request, env, provider, true);
+      }
+      return startSignIn(request, env, provider);
+    }
     const done = await finishSignIn(request, env, provider);
     if (!done.ok) return done.response;
-    const res = await arena.signIn(done.id);
+    if (done.link) {
+      const linked = await arena.linkIdentity(token, done.id, provider.id);
+      return linkRedirect(url, linked.ok ? `linked=${provider.id}` : `linkerror=${linked.error}`);
+    }
+    const res = await arena.signIn(done.id, provider.id);
     if (!res.ok) return Response.redirect(`${url.origin}/?autherror=blocked#/daily`, 302);
     return finishRedirect(url, res.token, done.next);
   }
@@ -111,6 +129,33 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
     const body = await readJson(request);
     return body ? reply(await arena.setName(token, body.name)) : json({ error: "Bad request" }, 400);
   }
+  if (path === "/api/me/profile" && request.method === "GET") return reply(await arena.myProfile(token));
+  if (path === "/api/me/settings" && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    const body = await readJson(request);
+    return body ? reply(await arena.updateSettings(token, body)) : json({ error: "Bad request" }, 400);
+  }
+  if (path === "/api/me/unlink" && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    const body = await readJson(request);
+    return body ? reply(await arena.unlinkIdentity(token, String(body.provider ?? ""))) : json({ error: "Bad request" }, 400);
+  }
+
+  // ---- other players and friends
+  const player = path.match(/^\/api\/players\/(.+)$/);
+  if (player && request.method === "GET") {
+    let name = "";
+    try { name = decodeURIComponent(player[1]); } catch { return json({ error: "Bad request" }, 400); }
+    return reply(await arena.playerProfile(token, name));
+  }
+  if (path === "/api/friends" && request.method === "GET") return reply(await arena.friendsList(token));
+  const friend = path.match(/^\/api\/friends\/(request|accept|decline|cancel|remove)$/);
+  if (friend && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    const body = await readJson(request);
+    return body ? reply(await arena.friendAction(token, friend[1], String(body.name ?? ""))) : json({ error: "Bad request" }, 400);
+  }
+
   if (path === "/api/me/avatar" && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
     const body = await readJson(request);

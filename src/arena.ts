@@ -95,7 +95,14 @@ export class Arena extends DurableObject<Env> {
     sql.exec("CREATE TABLE IF NOT EXISTS ratings (account_id TEXT PRIMARY KEY, rating INTEGER NOT NULL, games INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0, peak INTEGER NOT NULL, recent TEXT NOT NULL DEFAULT '[]', updated INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, code TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, list_key TEXT NOT NULL, status TEXT NOT NULL, a_before INTEGER, b_before INTEGER, a_delta INTEGER, b_delta INTEGER, outcome TEXT, reason TEXT, a_risk INTEGER NOT NULL DEFAULT 0, b_risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '{}')");
     sql.exec("CREATE TABLE IF NOT EXISTS ranked_pool (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, payload TEXT NOT NULL, created INTEGER NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS identities (id_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, provider TEXT NOT NULL, linked INTEGER NOT NULL)");
+    sql.exec("CREATE INDEX IF NOT EXISTS identities_account ON identities (account_id)");
+    sql.exec("CREATE TABLE IF NOT EXISTS friendships (lo TEXT NOT NULL, hi TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (lo, hi))");
+    sql.exec("CREATE INDEX IF NOT EXISTS friendships_hi ON friendships (hi)");
     // Added later; harmless if the column already exists.
+    try { sql.exec("ALTER TABLE accounts ADD COLUMN name_changed INTEGER"); } catch { /* already there */ }
+    try { sql.exec("ALTER TABLE accounts ADD COLUMN allow_requests INTEGER NOT NULL DEFAULT 1"); } catch { /* already there */ }
+    try { sql.exec("ALTER TABLE accounts ADD COLUMN profile_public INTEGER NOT NULL DEFAULT 1"); } catch { /* already there */ }
     try { sql.exec("ALTER TABLE accounts ADD COLUMN avatar TEXT"); } catch { /* already there */ }
     try { sql.exec("ALTER TABLE matches ADD COLUMN title TEXT"); } catch { /* already there */ }
     sql.exec("CREATE INDEX IF NOT EXISTS matches_status ON matches (status, ts)");
@@ -175,16 +182,65 @@ export class Arena extends DurableObject<Env> {
 
   // ---------------------------------------------------------------- accounts
 
-  /** Called after the provider has proved who someone is. `idHash` is already a one-way hash. */
-  async signIn(idHash: string): Promise<{ ok: true; token: string; name: string | null } | Fail> {
+  /**
+   * Called after a provider has proved who someone is. `idHash` is already a one-way hash of "provider:id".
+   * One account can have several sign-in methods (see `identities`); the account's own id is the hash of the
+   * first method it was created with, and never changes.
+   */
+  async signIn(idHash: string, provider: string): Promise<{ ok: true; token: string; name: string | null } | Fail> {
     const now = Date.now();
-    const found = this.q("SELECT id, name, banned FROM accounts WHERE id = ?", idHash);
+    let accountId: string;
+    const known = this.q("SELECT account_id FROM identities WHERE id_hash = ?", idHash);
+    if (known.length) {
+      accountId = String(known[0].account_id);
+      // Accounts made before linking existed have a placeholder method; now we learn which provider it was.
+      this.q("UPDATE identities SET provider = ? WHERE id_hash = ? AND provider = 'original'", provider, idHash);
+    } else if (this.q("SELECT 1 FROM accounts WHERE id = ?", idHash).length) {
+      accountId = idHash;
+      this.q("INSERT OR IGNORE INTO identities (id_hash, account_id, provider, linked) VALUES (?, ?, ?, ?)", idHash, idHash, provider, now);
+    } else {
+      accountId = idHash;
+      this.q("INSERT INTO accounts (id, name, banned, created, last_seen) VALUES (?, NULL, 0, ?, ?)", idHash, now, now);
+      this.q("INSERT INTO identities (id_hash, account_id, provider, linked) VALUES (?, ?, ?, ?)", idHash, idHash, provider, now);
+    }
+    const found = this.q("SELECT name, banned FROM accounts WHERE id = ?", accountId);
     if (found.length && Number(found[0].banned)) return fail(403, "This account can't be used.");
-    if (!found.length) this.q("INSERT INTO accounts (id, name, banned, created, last_seen) VALUES (?, NULL, 0, ?, ?)", idHash, now, now);
-    else this.q("UPDATE accounts SET last_seen = ? WHERE id = ?", now, idHash);
+    this.q("UPDATE accounts SET last_seen = ? WHERE id = ?", now, accountId);
     const token = randomToken();
-    this.q("INSERT INTO sessions (token_hash, account_id, expires) VALUES (?, ?, ?)", await sha256hex(token), idHash, now + SESSION_MS);
+    this.q("INSERT INTO sessions (token_hash, account_id, expires) VALUES (?, ?, ?)", await sha256hex(token), accountId, now + SESSION_MS);
     return { ok: true, token, name: found.length && found[0].name !== null ? String(found[0].name) : null };
+  }
+
+  /** Accounts that predate linking get a placeholder row so they show (and can unlink) correctly. */
+  private ensureIdentity(accountId: string): void {
+    if (!this.q("SELECT 1 FROM identities WHERE account_id = ?", accountId).length) {
+      this.q("INSERT OR IGNORE INTO identities (id_hash, account_id, provider, linked) VALUES (?, ?, 'original', ?)", accountId, accountId, Date.now());
+    }
+  }
+
+  async linkIdentity(token: string | null, idHash: string, provider: string): Promise<{ ok: true; already?: boolean } | Fail> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "auth");
+    this.ensureIdentity(acc.id);
+    const owner = this.q("SELECT account_id FROM identities WHERE id_hash = ?", idHash);
+    if (owner.length) return String(owner[0].account_id) === acc.id ? { ok: true, already: true } : fail(409, "taken");
+    // A pre-linking account that isn't in the identities table yet still owns its id.
+    if (idHash !== acc.id && this.q("SELECT 1 FROM accounts WHERE id = ?", idHash).length) return fail(409, "taken");
+    if (this.q("SELECT 1 FROM identities WHERE account_id = ? AND provider = ?", acc.id, provider).length) return fail(409, "provider");
+    this.q("INSERT INTO identities (id_hash, account_id, provider, linked) VALUES (?, ?, ?, ?)", idHash, acc.id, provider, Date.now());
+    return { ok: true };
+  }
+
+  async unlinkIdentity(token: string | null, provider: string): Promise<{ ok: true } | Fail> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    this.ensureIdentity(acc.id);
+    const mine = this.q("SELECT id_hash, provider FROM identities WHERE account_id = ?", acc.id);
+    const target = mine.find((r) => String(r.provider) === provider);
+    if (!target) return fail(404, "That sign-in method isn't linked.");
+    if (mine.length < 2) return fail(400, "You need at least one way to sign in, so you can't unlink your only one.");
+    this.q("DELETE FROM identities WHERE id_hash = ?", String(target.id_hash));
+    return { ok: true };
   }
 
   /** "colour:emblem" (each 0 to 11). Everyone gets a stable default until they pick one. No photos are ever stored. */
@@ -215,13 +271,21 @@ export class Arena extends DurableObject<Env> {
     const a = await this.account(token);
     if (!a) return fail(401, "Sign in first.");
     const name = String(raw ?? "").replace(/\s+/g, " ").trim();
-    if (!NAME_RE.test(name)) return fail(400, "Use 3 to 16 letters, numbers, spaces, hyphens or underscores.");
-    if (RESERVED.includes(name.toLowerCase())) return fail(400, "That name is reserved.");
+    if (!NAME_RE.test(name)) return fail(400, "Usernames are 3 to 16 letters, numbers, spaces, hyphens or underscores.");
+    if (RESERVED.includes(name.toLowerCase())) return fail(400, "That username is reserved.");
+    if (a.name === name) return { ok: true, name };
+    // The first username is free to set. After a change there's a cooldown so names can't be swapped to confuse people.
+    const days = Math.max(0, num(this.env.NAME_CHANGE_DAYS, 7));
+    const last = this.q("SELECT name_changed FROM accounts WHERE id = ?", a.id)[0].name_changed;
+    if (a.name && last && days > 0 && Date.now() - Number(last) < days * 86_400_000) {
+      return fail(429, `You can change your username again on ${isoDay(Number(last) + days * 86_400_000)}.`);
+    }
     try {
       this.q("UPDATE accounts SET name = ? WHERE id = ?", name, a.id);
     } catch {
-      return fail(409, "That name is taken. Try another.");
+      return fail(409, "That username is taken. Try another.");
     }
+    if (a.name) this.q("UPDATE accounts SET name_changed = ? WHERE id = ?", Date.now(), a.id);
     return { ok: true, name };
   }
 
@@ -235,6 +299,8 @@ export class Arena extends DurableObject<Env> {
     this.q("DELETE FROM sessions WHERE account_id = ?", a.id);
     this.queue.delete(a.id);
     this.q("DELETE FROM ratings WHERE account_id = ?", a.id);
+    this.q("DELETE FROM identities WHERE account_id = ?", a.id);
+    this.q("DELETE FROM friendships WHERE lo = ? OR hi = ?", a.id, a.id);
     this.q("DELETE FROM matches WHERE a = ? OR b = ?", a.id, a.id);
     this.q("DELETE FROM accounts WHERE id = ?", a.id);
     return { ok: true };
@@ -382,7 +448,7 @@ export class Arena extends DurableObject<Env> {
   async start(token: string | null, ip: string): Promise<any> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
-    if (!acc.name) return fail(400, "Choose a display name first.");
+    if (!acc.name) return fail(400, "Choose a username first.");
     if (acc.banned) return fail(403, "This account can't play.");
     this.closeStale();
     const date = this.today();
@@ -579,7 +645,7 @@ export class Arena extends DurableObject<Env> {
   async queueJoin(token: string | null): Promise<any> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
-    if (!acc.name) return fail(400, "Choose a display name first.");
+    if (!acc.name) return fail(400, "Choose a username first.");
     if (acc.banned) return fail(403, "This account can't play.");
     if (!this.activeMatch(acc.id)) {
       const r = this.ratingRow(acc.id);
@@ -760,15 +826,13 @@ export class Arena extends DurableObject<Env> {
     return { ok: true, rows: rows.slice(0, limit), me: mine && mine.rank > limit ? mine : null, minGames: min };
   }
 
-  /** Your recent finished ranked games, a rating trend and your current streak. Cancelled and voided matches are left out. */
-  async rankedHistory(token: string | null, limit = 12): Promise<any> {
-    const acc = await this.account(token);
-    if (!acc) return fail(401, "Sign in first.");
+  /** Recent finished ranked games for an account, a rating trend and the current streak. Cancelled and voided matches are left out. */
+  private historyFor(id: string, limit: number) {
     const rows = this.q(
       "SELECT m.ts, m.outcome, m.reason, m.title, m.a, m.a_before, m.b_before, m.a_delta, m.b_delta, a.name AS an, a.avatar AS aav, a.id AS aid, b.name AS bn, b.avatar AS bav, b.id AS bid FROM matches m JOIN accounts a ON a.id = m.a JOIN accounts b ON b.id = m.b WHERE m.status = 'done' AND (m.a = ? OR m.b = ?) ORDER BY m.ts DESC LIMIT 30",
-      acc.id, acc.id,
+      id, id,
     ).map((m) => {
-      const mineIsA = String(m.a) === acc.id;
+      const mineIsA = String(m.a) === id;
       const outcome = String(m.outcome);
       const result = outcome === "draw" ? "draw" : (mineIsA ? outcome === "a" : outcome === "b") ? "win" : "loss";
       const before = Number(mineIsA ? m.a_before : m.b_before);
@@ -799,7 +863,182 @@ export class Arena extends DurableObject<Env> {
       else if (Math.sign(streak) === dir) streak += dir;
       else break;
     }
-    return { ok: true, rows: rows.slice(0, limit), trend, streak };
+    return { rows: rows.slice(0, limit), trend, streak };
+  }
+
+  async rankedHistory(token: string | null, limit = 12): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    return { ok: true, ...this.historyFor(acc.id, limit) };
+  }
+
+  // ---------------------------------------------------------------- profile, settings, friends
+
+  private peekRating(id: string) {
+    const r = this.q("SELECT rating, games, wins, losses, draws, peak FROM ratings WHERE account_id = ?", id);
+    if (!r.length) return { rating: START_RATING, games: 0, wins: 0, losses: 0, draws: 0, peak: START_RATING };
+    return { rating: Number(r[0].rating), games: Number(r[0].games), wins: Number(r[0].wins), losses: Number(r[0].losses), draws: Number(r[0].draws), peak: Number(r[0].peak) };
+  }
+
+  /** How `me` relates to `other`: self, friends, incoming (they asked me), outgoing (I asked them), or none. */
+  private relationship(me: string, other: string): "self" | "friends" | "incoming" | "outgoing" | "none" {
+    if (me === other) return "self";
+    const [lo, hi] = me < other ? [me, other] : [other, me];
+    const r = this.q("SELECT status, requested_by FROM friendships WHERE lo = ? AND hi = ?", lo, hi);
+    if (!r.length) return "none";
+    if (String(r[0].status) === "accepted") return "friends";
+    if (String(r[0].status) === "pending") return String(r[0].requested_by) === me ? "outgoing" : "incoming";
+    return "none"; // a declined request
+  }
+
+  async myProfile(token: string | null): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    this.ensureIdentity(acc.id);
+    const row = this.q("SELECT created, name_changed, allow_requests, profile_public FROM accounts WHERE id = ?", acc.id)[0];
+    const days = Math.max(0, num(this.env.NAME_CHANGE_DAYS, 7));
+    const last = row.name_changed ? Number(row.name_changed) : 0;
+    const nextChange = last && days > 0 && Date.now() - last < days * 86_400_000 ? isoDay(last + days * 86_400_000) : null;
+    return {
+      ok: true,
+      name: acc.name,
+      avatar: this.avatarOf(acc.id, acc.avatar),
+      memberSince: isoDay(Number(row.created)).slice(0, 7),
+      nameChangeDays: days,
+      nextNameChange: nextChange,
+      allowRequests: Number(row.allow_requests) === 1,
+      profilePublic: Number(row.profile_public) === 1,
+      identities: this.q("SELECT provider, linked FROM identities WHERE account_id = ? ORDER BY linked ASC", acc.id).map((r) => ({ provider: String(r.provider), linkedOn: isoDay(Number(r.linked)) })),
+    };
+  }
+
+  async updateSettings(token: string | null, s: { allowRequests?: unknown; profilePublic?: unknown }): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    if (typeof s.allowRequests === "boolean") this.q("UPDATE accounts SET allow_requests = ? WHERE id = ?", s.allowRequests ? 1 : 0, acc.id);
+    if (typeof s.profilePublic === "boolean") this.q("UPDATE accounts SET profile_public = ? WHERE id = ?", s.profilePublic ? 1 : 0, acc.id);
+    return this.myProfile(token);
+  }
+
+  /** Another player's public profile. Players who keep theirs private show only a rating to people who aren't friends. */
+  async playerProfile(token: string | null, nameRaw: string): Promise<any> {
+    const viewer = await this.account(token);
+    if (!viewer) return fail(401, "Sign in first.");
+    const rows = this.q("SELECT id, name, avatar, created, profile_public, allow_requests, banned FROM accounts WHERE name = ?", String(nameRaw ?? "").slice(0, 20));
+    if (!rows.length || Number(rows[0].banned) || rows[0].name === null) return fail(404, "No player with that username.");
+    const r = rows[0];
+    const id = String(r.id);
+    const relationship = this.relationship(viewer.id, id);
+    const full = relationship === "self" || relationship === "friends" || Number(r.profile_public) === 1;
+    const stats = this.peekRating(id);
+    const ladder = this.ladderRows(this.ladderMin(), null).find((x) => x.id === id);
+    const base = {
+      ok: true,
+      name: String(r.name),
+      avatar: this.avatarOf(id, r.avatar),
+      relationship,
+      acceptsRequests: Number(r.allow_requests) === 1,
+      rating: stats.rating,
+      provisional: stats.games < PROVISIONAL_GAMES,
+      rank: ladder ? ladder.rank : null,
+      restricted: !full,
+    };
+    if (!full) return base;
+    const h = this.historyFor(id, 5);
+    return {
+      ...base,
+      games: stats.games, wins: stats.wins, losses: stats.losses, draws: stats.draws, peak: stats.peak,
+      memberSince: isoDay(Number(r.created)).slice(0, 7),
+      streak: h.streak,
+      trend: h.trend,
+      recent: h.rows.map((m) => ({ result: m.result, delta: m.delta, title: m.title, time: m.time, opponent: { name: m.opponent.name, avatar: m.opponent.avatar, rating: m.opponent.rating } })),
+    };
+  }
+
+  private friendRow(id: string) {
+    return this.q(
+      "SELECT f.status, f.requested_by, a.id AS other, a.name AS name, a.avatar AS avatar FROM friendships f JOIN accounts a ON a.id = CASE WHEN f.lo = ? THEN f.hi ELSE f.lo END WHERE (f.lo = ? OR f.hi = ?) AND a.banned = 0 AND a.name IS NOT NULL ORDER BY a.name ASC",
+      id, id, id,
+    );
+  }
+
+  async friendsList(token: string | null): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    const friends: any[] = [], incoming: any[] = [], outgoing: any[] = [];
+    for (const r of this.friendRow(acc.id)) {
+      const other = String(r.other);
+      const entry = { name: String(r.name), avatar: this.avatarOf(other, r.avatar), rating: this.peekRating(other).rating };
+      const status = String(r.status);
+      if (status === "accepted") {
+        const act = this.statusFor(other);
+        friends.push({ ...entry, activity: act.status === "matched" ? "In a ranked match" : act.status === "waiting" ? "Looking for a match" : null });
+      } else if (status === "pending") (String(r.requested_by) === acc.id ? outgoing : incoming).push(entry);
+    }
+    return { ok: true, friends, incoming, outgoing };
+  }
+
+  private findByName(name: unknown) {
+    const r = this.q("SELECT id, name, allow_requests, banned FROM accounts WHERE name = ?", String(name ?? "").slice(0, 20));
+    return r.length && !Number(r[0].banned) && r[0].name !== null ? { id: String(r[0].id), name: String(r[0].name), allow: Number(r[0].allow_requests) === 1 } : null;
+  }
+
+  private friendCount(id: string, status: string, requestedBy?: boolean): number {
+    const rows = this.q("SELECT requested_by FROM friendships WHERE (lo = ? OR hi = ?) AND status = ?", id, id, status);
+    return requestedBy === undefined ? rows.length : rows.filter((r) => (String(r.requested_by) === id) === requestedBy).length;
+  }
+
+  async friendAction(token: string | null, action: string, nameRaw: string): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    if (!acc.name) return fail(400, "Choose a username first.");
+    const target = this.findByName(nameRaw);
+    if (!target) return fail(404, "No player with that username.");
+    if (target.id === acc.id) return fail(400, "That's you.");
+    const [lo, hi] = acc.id < target.id ? [acc.id, target.id] : [target.id, acc.id];
+    const rel = this.relationship(acc.id, target.id);
+    const MAX_FRIENDS = 100, MAX_PENDING = 25;
+
+    switch (action) {
+      case "request": {
+        if (rel === "friends") return fail(409, `You're already friends with ${target.name}.`);
+        if (rel === "outgoing") return fail(409, `You've already sent ${target.name} a request.`);
+        if (rel === "incoming") return this.friendAction(token, "accept", target.name); // they asked first: just accept
+        const declined = this.q("SELECT requested_by, created FROM friendships WHERE lo = ? AND hi = ? AND status = 'declined'", lo, hi);
+        if (declined.length && String(declined[0].requested_by) === acc.id && Date.now() - Number(declined[0].created) < 7 * 86_400_000) {
+          return fail(403, `You can't send ${target.name} a request right now.`);
+        }
+        if (!target.allow) return fail(403, `${target.name} isn't accepting friend requests.`);
+        if (this.friendCount(acc.id, "pending", true) >= MAX_PENDING) return fail(429, "You have too many requests waiting. Cancel some first.");
+        if (this.friendCount(acc.id, "accepted") >= MAX_FRIENDS) return fail(409, "Your friends list is full.");
+        this.q("INSERT OR REPLACE INTO friendships (lo, hi, status, requested_by, created) VALUES (?, ?, 'pending', ?, ?)", lo, hi, acc.id, Date.now());
+        return { ok: true, status: "requested" };
+      }
+      case "accept": {
+        if (rel !== "incoming") return fail(404, `${target.name} hasn't sent you a request.`);
+        if (this.friendCount(acc.id, "accepted") >= MAX_FRIENDS || this.friendCount(target.id, "accepted") >= MAX_FRIENDS) return fail(409, "A friends list is full.");
+        this.q("UPDATE friendships SET status = 'accepted', created = ? WHERE lo = ? AND hi = ?", Date.now(), lo, hi);
+        return { ok: true, status: "friends" };
+      }
+      case "decline": {
+        if (rel !== "incoming") return fail(404, `${target.name} hasn't sent you a request.`);
+        // Kept for a week so the same person can't keep re-sending it. They aren't told.
+        this.q("UPDATE friendships SET status = 'declined', created = ? WHERE lo = ? AND hi = ?", Date.now(), lo, hi);
+        return { ok: true, status: "none" };
+      }
+      case "cancel": {
+        if (rel !== "outgoing") return fail(404, "There's no request to cancel.");
+        this.q("DELETE FROM friendships WHERE lo = ? AND hi = ?", lo, hi);
+        return { ok: true, status: "none" };
+      }
+      case "remove": {
+        if (rel !== "friends") return fail(404, `${target.name} isn't on your friends list.`);
+        this.q("DELETE FROM friendships WHERE lo = ? AND hi = ?", lo, hi);
+        return { ok: true, status: "none" };
+      }
+      default:
+        return fail(400, "Unknown action.");
+    }
   }
 
   // ---- the pool of lists used for ranked matches
