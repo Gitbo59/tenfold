@@ -8,6 +8,14 @@ http.createServer((req, res) => {
   let body = ""; req.on("data", (d) => (body += d));
   req.on("end", () => {
     if (url.pathname === "/log") { res.setHeader("content-type", "application/json"); return res.end(JSON.stringify(log)); }
+    if (url.pathname === "/authorize" && !url.searchParams.get("as")) {
+      // Opened by a person in a browser (tests always pass ?as=). Let them pick who to sign in as.
+      const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      const hidden = [...url.searchParams].map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("");
+      const quick = ["Alice", "Bob", "Cara", "Dev"].map((n) => { const u = new URL(url); u.searchParams.set("as", n); return `<a href="${esc(u.pathname + u.search)}">${n}</a>`; }).join(" ");
+      res.setHeader("content-type", "text/html");
+      return res.end(`<!doctype html><meta charset="utf-8"><title>Fake sign-in</title><body style="font:16px system-ui;max-width:30rem;margin:4rem auto;padding:0 1rem"><h1>Fake sign-in (local preview only)</h1><p>This stands in for Google, GitHub or Discord. Whatever you type becomes your sign-in ID, so the same text always gives you the same account.</p><form method="get" action="/authorize">${hidden}<input name="as" placeholder="e.g. alice" required autofocus style="font:inherit;padding:.5rem"> <button style="font:inherit;padding:.5rem 1rem">Sign in</button></form><p>Quick picks: ${quick}</p></body>`);
+    }
     if (url.pathname === "/authorize") {
       const code = crypto.randomBytes(8).toString("hex");
       log.authorize.push(Object.fromEntries(url.searchParams));

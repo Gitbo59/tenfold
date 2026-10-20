@@ -8,10 +8,27 @@ Built as a single **Cloudflare Worker with static assets**, one **Durable Object
 
 ```bash
 npm install
-npm run dev          # http://localhost:8787
+npm run dev          # http://localhost:8787 (real AI and sign-in; see the next section for an offline version)
 ```
 
 Workers AI always runs against your real Cloudflare account, even in local dev. `wrangler dev` will ask you to log in (`npx wrangler login`), and test lists use the same daily free allowance as the live site. Open two browser windows (one private) to play against yourself.
+
+## Previewing your changes in VS Code
+
+The site has no build step, so previewing is just "save, then refresh". The easiest way to start is the **offline preview**, which fakes the AI and the Google/GitHub/Discord sign-in so you need no accounts, keys or internet:
+
+1. Open the project folder in VS Code and open a terminal (Terminal > New Terminal).
+2. First time only: `npm install`.
+3. Run `npm run dev:offline`. After a few seconds it prints `Preview ready: http://localhost:8787`.
+4. Open that address, either in your browser (Ctrl+click the link in the terminal) or inside VS Code: press Ctrl+Shift+P, choose **Simple Browser: Show**, and paste the address.
+5. Edit anything in `public/` (pages, styles, scripts), save, and refresh the browser. If a change doesn't show, do a hard refresh (Ctrl+Shift+R), or tick "Disable cache" in the browser's DevTools Network tab while you work. Edits in `src/` restart the server by itself.
+6. To see a phone layout, open DevTools (F12) and toggle the device toolbar (Ctrl+Shift+M).
+7. To be two players (friends, ranked, rooms), use two browser windows, one of them private. "Continue with Test provider" opens a fake sign-in page where you type any name, and the same name always gives you the same account.
+8. Everything you create is kept in the `.wrangler-dev` folder. Stop the preview with Ctrl+C and delete that folder to start from scratch.
+
+In this mode every topic returns the same fake list (the NATO alphabet), username changes have no cooldown, and everything else uses the real timings (30 seconds an answer in the daily challenge, 20 in ranked). To preview with the **real AI and real sign-in** instead, use `npm run dev`: it needs `npx wrangler login`, a `.dev.vars` file (see `.dev.vars.example`), and OAuth apps registered with `http://localhost:8787/api/auth/<provider>/callback` as the callback. If the preview won't start, another program may be using ports 8787, 9998 or 9999.
+
+To check you haven't broken anything, run `npm test`.
 
 ## Deploy
 

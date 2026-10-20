@@ -86,7 +86,6 @@ main { padding: 0 clamp(16px, 4vw, 40px) 40px; max-width: 1180px; margin: 0 auto
 .btn-quiet { border-color: transparent; color: var(--muted); padding: 8px 14px; }
 .btn-small { padding: 7px 14px; font-size: 0.9rem; }
 .btn-big { padding: 14px 26px; font-size: 1.1rem; width: 100%; margin-top: 18px; }
-.btn-username { background: var(--bulb); border-color: var(--bulb); color: var(--stage-deep); margin-top: 8px; }
 
 .field { display: grid; gap: 6px; }
 .field-label { font-weight: 700; font-size: 0.95rem; color: #dfe3ff; }

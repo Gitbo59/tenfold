@@ -1,3 +1,6 @@
 node_modules
 .wrangler
 .dev.vars
+.wrangler-dev
+wrangler.dev.jsonc
+wrangler.test.jsonc
