@@ -15,6 +15,7 @@ const quotaStub = (env: Env) => env.QUOTA.get(env.QUOTA.idFromName("global"));
 interface ArenaApi {
   signIn(idHash: string, provider: string): Promise<{ ok: true; token: string; name: string | null } | { ok: false; status: number; error: string }>;
   me(token: string | null): Promise<{ signedIn: boolean; name: string | null; avatar: string | null }>;
+  seedPreviewData(token: string | null): Promise<void>;
   setAvatar(token: string | null, color: unknown, icon: unknown): Promise<any>;
   rankedHistory(token: string | null, limit?: number): Promise<any>;
   signOut(token: string | null): Promise<void>;
@@ -130,7 +131,11 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
   // ---- account
   if (path === "/api/me" && request.method === "GET") {
     const me = await arena.me(token);
-    if (env.PREVIEW_MODE !== "true" || me.signedIn) return json(me);
+    if (env.PREVIEW_MODE !== "true") return json(me);
+    if (me.signedIn) {
+      await arena.seedPreviewData(token);
+      return json(me);
+    }
 
     const signedIn = await arena.signIn(await previewAccountId(), "preview");
     if (!signedIn.ok) return reply(signedIn);
@@ -142,6 +147,7 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
       }
     }
 
+    await arena.seedPreviewData(signedIn.token);
     const response = json(await arena.me(signedIn.token));
     response.headers.append("Set-Cookie", cookie(url, SESSION_COOKIE, signedIn.token, 30 * 24 * 60 * 60));
     return response;

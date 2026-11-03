@@ -14,7 +14,28 @@ ok(!!cookie && /HttpOnly/.test(cookie) && /SameSite=Lax/.test(cookie), "preview 
 const session = cookie?.split(";")[0] ?? "";
 const headers = { cookie: session };
 const ranked = await (await fetch(`${BASE}/api/ranked/me`, { headers })).json();
-ok(ranked.ok && ranked.name === "Preview Player" && ranked.rating === 1200, "dummy account can access ranked profile and starts at the default rating");
+ok(ranked.ok && ranked.name === "Preview Player" && ranked.games === 8 && ranked.wins === 5 && ranked.losses === 2 && ranked.draws === 1, "dummy account has a seeded ranked record");
+ok(ranked.ladder.rows.some((row) => row.name === "Avery Demo") && ranked.rank !== null, "preview rivals populate the ranked ladder");
+
+const history = await (await fetch(`${BASE}/api/ranked/history`, { headers })).json();
+ok(history.ok && history.rows.length === 8 && history.rows.some((row) => row.result === "win") && history.rows.some((row) => row.result === "loss"), "ranked match history includes varied results");
+
+const friends = await (await fetch(`${BASE}/api/friends`, { headers })).json();
+ok(friends.ok && friends.friends.length === 5 && friends.incoming.length === 1 && friends.outgoing.length === 1, "preview friends, incoming requests, and outgoing requests are populated");
+
+const todayBoard = await (await fetch(`${BASE}/api/daily/leaderboard?scope=today`, { headers })).json();
+ok(todayBoard.ok && todayBoard.rows.length >= 6 && todayBoard.rows.every((row) => row.name.endsWith("Demo")), "today's daily leaderboard contains synthetic players");
+const monthBoard = await (await fetch(`${BASE}/api/daily/leaderboard?scope=month`, { headers })).json();
+const dayOfMonth = new Date().getUTCDate();
+ok(monthBoard.ok && monthBoard.rows.some((row) => row.name.endsWith("Demo")), "monthly daily leaderboard contains preview results");
+ok(dayOfMonth === 1 || monthBoard.rows.some((row) => row.name === "Preview Player"), "previous daily results include Preview Player in the monthly leaderboard");
+
+const dailyStart = await fetch(`${BASE}/api/daily/start`, {
+  method: "POST",
+  headers: { ...headers, "content-type": "application/json", Origin: BASE },
+  body: "{}",
+});
+ok((await dailyStart.json()).status === "playing", "seeded leaderboard data leaves Preview Player's daily attempt available");
 
 const queue = await fetch(`${BASE}/api/ranked/queue`, {
   method: "POST",

@@ -97,6 +97,7 @@ export class Arena extends DurableObject<Env> {
     sql.exec("CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, code TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, list_key TEXT NOT NULL, status TEXT NOT NULL, a_before INTEGER, b_before INTEGER, a_delta INTEGER, b_delta INTEGER, outcome TEXT, reason TEXT, a_risk INTEGER NOT NULL DEFAULT 0, b_risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '{}')");
     sql.exec("CREATE TABLE IF NOT EXISTS ranked_pool (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, payload TEXT NOT NULL, created INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS identities (id_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, provider TEXT NOT NULL, linked INTEGER NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS preview_seed (account_id TEXT PRIMARY KEY, created INTEGER NOT NULL)");
     sql.exec("CREATE INDEX IF NOT EXISTS identities_account ON identities (account_id)");
     sql.exec("CREATE TABLE IF NOT EXISTS friendships (lo TEXT NOT NULL, hi TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (lo, hi))");
     sql.exec("CREATE INDEX IF NOT EXISTS friendships_hi ON friendships (hi)");
@@ -213,6 +214,115 @@ export class Arena extends DurableObject<Env> {
     return { ok: true, token, name: found.length && found[0].name !== null ? String(found[0].name) : null };
   }
 
+  async seedPreviewData(token: string | null): Promise<void> {
+    const preview = await this.account(token);
+    if (!preview) return;
+    const identity = this.q("SELECT 1 FROM identities WHERE account_id = ? AND id_hash = ? AND provider = 'preview'", preview.id, preview.id);
+    if (!identity.length || this.q("SELECT 1 FROM preview_seed WHERE account_id = ?", preview.id).length) return;
+
+    const names = ["Avery Demo", "Blake Demo", "Casey Demo", "Drew Demo", "Emery Demo", "Finley Demo", "Gray Demo", "Harper Demo", "Indigo Demo", "Jules Demo"];
+    const ids = await Promise.all(names.map((name) => sha256hex(`tenfold:preview:account:${name}`)));
+    const now = Date.now();
+    const byName = new Map(names.map((name, i) => [name, ids[i]]));
+
+    for (let i = 0; i < names.length; i++) {
+      this.q("INSERT OR IGNORE INTO accounts (id, name, banned, created, last_seen) VALUES (?, ?, 0, ?, ?)", ids[i], names[i], now - 90 * 86_400_000, now);
+    }
+
+    const fixtures = [
+      { result: "a", opponent: 1260, title: "Highest mountains in the world" },
+      { result: "b", opponent: 1340, title: "Largest islands in the world" },
+      { result: "a", opponent: 1410, title: "Largest US states by total area" },
+      { result: "a", opponent: 1480, title: "Largest lakes in the world" },
+      { result: "draw", opponent: 1530, title: "Largest countries in Africa by area" },
+      { result: "b", opponent: 1600, title: "Largest countries in South America by area" },
+      { result: "a", opponent: 1670, title: "Highest mountains in the world" },
+      { result: "a", opponent: 1740, title: "Largest islands in the world" },
+    ] as const;
+    let rating = START_RATING;
+    let games = 0, wins = 0, losses = 0, draws = 0, peak = START_RATING;
+    const recent: string[] = [];
+    for (let i = 0; i < fixtures.length; i++) {
+      const fixture = fixtures[i];
+      const opponentId = ids[i];
+      const scoreA = fixture.result === "a" ? 1 : fixture.result === "b" ? 0 : 0.5;
+      const opponentGames = 18;
+      const { aDelta, bDelta } = ratingChange({ rating, games }, { rating: fixture.opponent, games: opponentGames }, scoreA);
+      const nextRating = rating + aDelta;
+      const ts = now - (fixtures.length - i) * 2 * 86_400_000;
+      const listKey = `classic:${CLASSICS[i % CLASSICS.length].id}`;
+      const matchId = `preview-${preview.id.slice(0, 12)}-${i + 1}`;
+      this.q(
+        "INSERT OR REPLACE INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before, a_delta, b_delta, outcome, reason, a_risk, b_risk, flags, title) VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, 'completed', 0, 0, '{}', ?)",
+        matchId, ts, `D${String(i + 1).padStart(4, "0")}`, preview.id, opponentId, listKey, rating, fixture.opponent, aDelta, bDelta, fixture.result, fixture.title,
+      );
+      const botRating = fixture.opponent + bDelta;
+      this.q(
+        "INSERT INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, 18, 10, 7, 1, ?, '[]', ?) ON CONFLICT(account_id) DO UPDATE SET rating=excluded.rating, games=excluded.games, wins=excluded.wins, losses=excluded.losses, draws=excluded.draws, peak=excluded.peak, updated=excluded.updated",
+        opponentId, botRating, Math.max(fixture.opponent + 120, botRating), now,
+      );
+      if (fixture.result === "a") wins++;
+      else if (fixture.result === "b") losses++;
+      else draws++;
+      games++;
+      rating = nextRating;
+      peak = Math.max(peak, rating);
+      recent.push(listKey);
+    }
+    this.q(
+      "INSERT INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET rating=excluded.rating, games=excluded.games, wins=excluded.wins, losses=excluded.losses, draws=excluded.draws, peak=excluded.peak, recent=excluded.recent, updated=excluded.updated",
+      preview.id, rating, games, wins, losses, draws, peak, JSON.stringify(recent.slice(-10)), now,
+    );
+    for (let i = 8; i < names.length; i++) {
+      const extraRating = i === 8 ? 1840 : 1785;
+      this.q(
+        "INSERT INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, 26, 17, 7, 2, ?, '[]', ?) ON CONFLICT(account_id) DO UPDATE SET rating=excluded.rating, games=excluded.games, wins=excluded.wins, losses=excluded.losses, draws=excluded.draws, peak=excluded.peak, updated=excluded.updated",
+        ids[i], extraRating, extraRating + 145, now,
+      );
+    }
+
+    const addFriend = (name: string, status: "accepted" | "pending", requestedBy: string) => {
+      const id = byName.get(name)!;
+      const [lo, hi] = preview.id < id ? [preview.id, id] : [id, preview.id];
+      this.q("INSERT OR IGNORE INTO friendships (lo, hi, status, requested_by, created) VALUES (?, ?, ?, ?, ?)", lo, hi, status, requestedBy, now - 12 * 86_400_000);
+    };
+    for (const name of names.slice(0, 5)) addFriend(name, "accepted", preview.id);
+    addFriend(names[5], "pending", ids[5]);
+    addFriend(names[6], "pending", preview.id);
+
+    const today = new Date();
+    const monthStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1);
+    const offsets = [0, 1, 3, 6, 10, 16, 23];
+    const dailyList = JSON.stringify({
+      title: "Preview daily challenge",
+      basis: "Synthetic preview leaderboard fixture",
+      source: "",
+      answers: Array.from({ length: 10 }, (_, i) => ({ answer: `Demo answer ${i + 1}`, aliases: [] })),
+    });
+    const addAttempt = (accountId: string, date: string, score: number, salt: number) => {
+      const ts = Date.parse(`${date}T12:00:00.000Z`) + salt * 1000;
+      const found = Array.from({ length: 10 }, (_, i) => ({ rank: i + 1, points: Math.max(1, Math.round(score / 10)), ms: 5000 + i * 250 }));
+      this.q(
+        "INSERT OR IGNORE INTO attempts (date, account_id, started, last_at, lives, score, total_ms, found, wrong, wrong_keys, state, risk, flags, review, ip) VALUES (?, ?, ?, ?, 0, ?, ?, ?, 0, '[]', 'done', 0, '[]', 'none', 'preview')",
+        date, accountId, ts, ts + 30_000, score, 30_000, JSON.stringify(found),
+      );
+    };
+    for (const offset of offsets) {
+      const stamp = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - offset));
+      const date = isoDay(stamp.getTime());
+      if (offset > 0 && stamp.getTime() >= monthStart) {
+        this.q("INSERT OR IGNORE INTO daily_lists (date, topic, difficulty, payload, status, created) VALUES (?, 'Preview daily challenge', 'easy', ?, 'ok', ?)", date, dailyList, now);
+      }
+      if (offset === 0) {
+        for (let i = 0; i < 6; i++) addAttempt(ids[i], date, 710 + ((i * 97) % 280), i);
+      } else if (stamp.getTime() >= monthStart) {
+        for (let i = 0; i < names.length; i++) addAttempt(ids[i], date, 620 + ((i * 83 + offset * 17) % 420), i + offset);
+        if ([1, 3, 6].includes(offset)) addAttempt(preview.id, date, 780 + offset * 9, 20 + offset);
+      }
+    }
+    this.q("INSERT OR IGNORE INTO preview_seed (account_id, created) VALUES (?, ?)", preview.id, now);
+  }
+
   /** Accounts that predate linking get a placeholder row so they show (and can unlink) correctly. */
   private ensureIdentity(accountId: string): void {
     if (!this.q("SELECT 1 FROM identities WHERE account_id = ?", accountId).length) {
@@ -304,6 +414,7 @@ export class Arena extends DurableObject<Env> {
     this.q("DELETE FROM identities WHERE account_id = ?", a.id);
     this.q("DELETE FROM friendships WHERE lo = ? OR hi = ?", a.id, a.id);
     this.q("DELETE FROM matches WHERE a = ? OR b = ?", a.id, a.id);
+    this.q("DELETE FROM preview_seed WHERE account_id = ?", a.id);
     this.q("DELETE FROM accounts WHERE id = ?", a.id);
     return { ok: true };
   }
