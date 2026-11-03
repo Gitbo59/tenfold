@@ -9,6 +9,7 @@
   let waitingSince = 0;
   let enteringMatch = false;
   let dailyTab = "today";
+  let friendsRefreshTimer = null;
 
   async function api(path, body) {
     const opts = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -45,6 +46,7 @@
   // ------------------------------------------------------------------ page flow
   async function refresh() {
     stopPolling();
+    clearTimeout(friendsRefreshTimer);
     enteringMatch = false;
     const authError = new URL(location.href).searchParams.get("autherror");
     if (authError) {
@@ -82,6 +84,7 @@
     renderRecent(hist);
     renderDaily(daily);
     renderFriends(friends);
+    scheduleFriendsRefresh();
     loadDailyBoard();
     const ladder = me.ladder || {};
     $("#rk-ladder-body").innerHTML = ladder.rows ? ladderHtml(ladder.rows.slice(0, 20), ladder.me) : '<p class="hint">Couldn\'t load the ladder just now.</p>';
@@ -162,14 +165,31 @@
   // ------------------------------------------------------------------ friends
   function renderFriends(f) {
     if (!f || f.error) return;
+    f.friends ||= []; f.incoming ||= []; f.outgoing ||= [];
+    f.incomingInvites ||= []; f.outgoingInvites ||= [];
     $("#fr-count").textContent = f.friends.length ? `(${f.friends.length})` : "";
     const row = (p, hint, actions) =>
       `<li class="fr-row"><span>${T.avatar(p.avatar, 32)}</span><span class="fr-name">${plink(p.name)}<span class="hint">${p.rating}${hint ? `, ${esc(hint)}` : ""}</span></span><span class="fr-actions">${actions}</span></li>`;
     const btn = (act, name, label, primary) => `<button class="btn btn-small${primary ? " btn-primary" : ""}" type="button" data-fr="${act}" data-name="${esc(name)}">${label}</button>`;
+    const playButtons = (name) =>
+      `<button class="btn btn-small" type="button" data-play-mode="rated" data-name="${esc(name)}" aria-label="Invite ${esc(name)} to a rated game">Rated</button><button class="btn btn-small" type="button" data-play-mode="casual" data-name="${esc(name)}" aria-label="Invite ${esc(name)} to a casual game">Casual</button>`;
+    const gameInvite = (invite) => {
+      const mode = invite.mode === "rated" ? "Rated" : "Casual";
+      const actions = invite.status === "accepted"
+        ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="join" data-code="${esc(invite.code)}" data-name="${esc(invite.name)}">Join ${mode.toLowerCase()} game</button>`
+        : invite.direction === "incoming"
+          ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="accept" data-id="${esc(invite.id)}">Accept</button>${btn("invite-decline", invite.id, "Decline", false)}`
+          : btn("invite-cancel", invite.id, "Cancel", false);
+      return `<li class="fr-row game-invite-row"><span class="invite-mode">${mode}</span><span class="fr-name"><strong>${plink(invite.name)}</strong><span class="hint">${invite.status === "accepted" ? "Game ready" : invite.direction === "incoming" ? "invited you to play" : "waiting for a reply"}</span></span><span class="fr-actions">${actions}</span></li>`;
+    };
+    const gameInvites = [...f.incomingInvites, ...f.outgoingInvites];
+    $("#fr-game-invites").hidden = !gameInvites.length;
+    $("#fr-game-incoming").innerHTML = f.incomingInvites.map(gameInvite).join("");
+    $("#fr-game-outgoing").innerHTML = f.outgoingInvites.map(gameInvite).join("");
     $("#fr-requests").hidden = !f.incoming.length;
     $("#fr-incoming").innerHTML = f.incoming.map((p) => row(p, "wants to be friends", btn("accept", p.name, "Accept", true) + btn("decline", p.name, "Decline"))).join("");
     $("#fr-list").innerHTML = f.friends.length
-      ? f.friends.map((p) => row(p, p.activity, "")).join("")
+      ? f.friends.map((p) => row(p, p.activity, playButtons(p.name))).join("")
       : '<li class="hint">No friends yet. Send a request using a username above.</li>';
     $("#fr-sent").hidden = !f.outgoing.length;
     $("#fr-outgoing").innerHTML = f.outgoing.map((p) => row(p, "waiting for a reply", btn("cancel", p.name, "Cancel"))).join("");
@@ -177,6 +197,23 @@
 
   async function reloadFriends() {
     renderFriends(await api("/api/friends"));
+  }
+
+  function scheduleFriendsRefresh() {
+    clearTimeout(friendsRefreshTimer);
+    friendsRefreshTimer = setTimeout(async () => {
+      if ($("#screen-ranked").hidden) return;
+      await reloadFriends();
+      scheduleFriendsRefresh();
+    }, 7000);
+  }
+
+  function joinFriendGame(code, name) {
+    if (!/^[A-Z0-9]{5}$/.test(code || "")) return toast("That game room is no longer available.", "error");
+    const ownName = $("#rk-name").textContent.trim();
+    if (ownName) localStorage.setItem("tf_name", ownName);
+    toast(`Joining ${name}'s game.`);
+    T.enterRoom(code);
   }
 
   $("#fr-add-form").addEventListener("submit", async (e) => {
@@ -192,12 +229,34 @@
 
   $(".friends-card").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-fr]");
+    const gameButton = e.target.closest("[data-invite-action]");
+    const playButton = e.target.closest("[data-play-mode]");
+    if (gameButton?.dataset.inviteAction === "join") return joinFriendGame(gameButton.dataset.code, gameButton.dataset.name);
+    if (gameButton) {
+      gameButton.disabled = true;
+      const action = gameButton.dataset.inviteAction;
+      const r = await api(`/api/ranked/invites/${action}`, { id: gameButton.dataset.id });
+      if (r.error) toast(r.error, "error");
+      else if (action === "accept") return joinFriendGame(r.code, "your friend's");
+      reloadFriends();
+      return;
+    }
+    if (playButton) {
+      playButton.disabled = true;
+      const r = await api("/api/ranked/invites", { name: playButton.dataset.name, mode: playButton.dataset.playMode });
+      if (r.error) toast(r.error, "error");
+      else toast(`${playButton.dataset.playMode === "rated" ? "Rated" : "Casual"} game invitation sent.`);
+      await reloadFriends();
+      return;
+    }
     if (!b) return;
     b.disabled = true;
-    const r = await api(`/api/friends/${b.dataset.fr}`, { name: b.dataset.name });
+    const action = b.dataset.fr.startsWith("invite-") ? b.dataset.fr.slice("invite-".length) : b.dataset.fr;
+    const isInviteAction = b.dataset.fr.startsWith("invite-");
+    const r = await api(isInviteAction ? `/api/ranked/invites/${action}` : `/api/friends/${action}`, isInviteAction ? { id: b.dataset.name } : { name: b.dataset.name });
     if (r.error) toast(r.error, "error");
-    else if (b.dataset.fr === "accept") toast(`You're now friends with ${b.dataset.name}.`);
-    reloadFriends();
+    else if (action === "accept") toast(`You're now friends with ${b.dataset.name}.`);
+    await reloadFriends();
   });
 
   // ------------------------------------------------------------------ daily challenge card

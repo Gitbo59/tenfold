@@ -23,6 +23,7 @@ const code = $$("#room-code span").map((s) => s.textContent).join("");
 
 console.log("lobby controls");
 ok($$("#classics .chip").length === 6, "six built-in lists offered");
+ok($("#list-url").type === "url" && $("#prefer-latest-year").type === "checkbox", "For fun lobby offers webpage import and a latest-year preference");
 ok(await until(() => /Free AI lists left today: \d+ of \d+/.test($("#budget-note").textContent)), "host sees the free-AI budget note: " + $("#budget-note").textContent.slice(0, 60));
 ok($$(".seg").length === 2 && $(".seg[data-diff=easy]").getAttribute("aria-checked") === "true", "difficulty defaults to Easy");
 ok($("#hints-val").textContent === "3", "hints default to 3");

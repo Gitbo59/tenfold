@@ -47,6 +47,7 @@ interface ArenaApi {
   queueLeave(token: string | null): Promise<any>;
   rankedMe(token: string | null): Promise<any>;
   rankedLadder(token: string | null, limit?: number): Promise<any>;
+  rankedInvite(token: string | null, action: string, value: string, mode?: string): Promise<any>;
   adminMatches(limit?: number): Promise<any>;
   adminVoidMatch(id: string): Promise<any>;
   adminSetRating(name: string, rating: number): Promise<any>;
@@ -229,6 +230,14 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
   if ((path === "/api/ranked/queue" || path === "/api/ranked/leave") && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
     return reply(path.endsWith("queue") ? await arena.queueJoin(token) : await arena.queueLeave(token));
+  }
+  const gameInvite = path.match(/^\/api\/ranked\/invites(?:\/(accept|decline|cancel))?$/);
+  if (gameInvite && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    const body = await readJson(request);
+    if (!body) return json({ error: "Bad request" }, 400);
+    const action = gameInvite[1] ?? "send";
+    return reply(await arena.rankedInvite(token, action, String(action === "send" ? body.name ?? "" : body.id ?? ""), String(body.mode ?? "")));
   }
 
   // ---- owner only

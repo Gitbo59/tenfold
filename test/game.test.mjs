@@ -50,6 +50,12 @@ for (let i = 0; i < 100 && !A.toasts.some((t) => t.kind === "error"); i++) await
 await A.until((s) => s.phase === "lobby");
 ok(A.state.phase === "lobby", "back in lobby after rejection");
 ok(A.toasts.some((t) => t.kind === "error" && /can't be used/.test(t.msg)), "rejected topic returns to lobby with error toast");
+const aiBeforeImport = (await (await fetch("http://127.0.0.1:9999/count")).json()).calls;
+A.send({ t: "start", listUrl: "http://lists.example/ranking" });
+for (let i = 0; i < 100 && !A.toasts.some((t) => /HTTPS/.test(t.msg)); i++) await sleep(25);
+await A.until((s) => s.phase === "lobby");
+const aiAfterImport = (await (await fetch("http://127.0.0.1:9999/count")).json()).calls;
+ok(A.toasts.some((t) => t.kind === "error" && /HTTPS/.test(t.msg)) && aiAfterImport === aiBeforeImport, "an invalid list URL surfaces an error without falling back to AI");
 A.send({ t: "start", topic: "NATO alphabet" });
 await A.until((s) => s.phase === "playing");
 ok(A.state.answers.length === 10 && A.state.answers.every((a) => a.answer === undefined), "answers are hidden from clients while playing");

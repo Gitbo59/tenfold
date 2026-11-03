@@ -3,6 +3,7 @@ import { AiError, cacheKey, generateTopTen, type Difficulty, type TopTen } from 
 import { CLASSICS, getClassic } from "./classics";
 import { assessGuess, cleanSignals } from "./anticheat";
 import { matchGuess, normalize, type Answer } from "./match";
+import { importListUrl } from "./list-import";
 import type { Env } from "./types";
 import { num } from "./util";
 
@@ -507,7 +508,7 @@ export class Room extends DurableObject<Env> {
   // ---------------------------------------------------------------- starting a game
 
   /** Gets a list from the cache or the AI, always through the free-allowance guards. */
-  private async getList(ws: WebSocket, topic: string, difficulty: Difficulty, key: string): Promise<TopTen> {
+  private async getList(ws: WebSocket, topic: string, difficulty: Difficulty, key: string, preferLatestYear: boolean): Promise<TopTen> {
     const q = this.quota();
     // A room that already played this exact list gets a fresh one if the budget allows.
     if (!this.s.playedKeys.includes(key)) {
@@ -543,7 +544,7 @@ export class Room extends DurableObject<Env> {
           this.s.genCount = Math.max(0, this.s.genCount - 1);
           await q.refundGeneration(ip);
         },
-      });
+      }, preferLatestYear);
       await q.cachePut(key, list);
       return list;
     } catch (err) {
@@ -562,16 +563,18 @@ export class Room extends DurableObject<Env> {
     if (this.s.ranked) return;
     if (this.s.phase !== "lobby" || this.hostId() !== me.id) return;
 
-    const wantsClassic = typeof msg.classic === "string" && msg.classic.length > 0;
+    const listUrl = typeof msg.listUrl === "string" ? msg.listUrl.trim() : "";
+    if (listUrl.length > 2048) return this.toast(ws, "That list URL is too long.", "error");
+    const wantsClassic = !listUrl && typeof msg.classic === "string" && msg.classic.length > 0;
     const classic = wantsClassic ? getClassic(msg.classic) : undefined;
     if (wantsClassic && !classic) return this.toast(ws, "That built-in list doesn't exist.", "error");
     const topic = cleanText(msg.topic, 120);
-    if (!classic && topic.length < 3) return this.toast(ws, "Enter a topic first (at least 3 characters).", "error");
+    if (!classic && !listUrl && topic.length < 3) return this.toast(ws, "Enter a topic first (at least 3 characters), choose a built-in list, or enter a list URL.", "error");
 
     // Anyone who dropped out of the lobby doesn't get a seat.
     this.s.players = this.s.players.filter((p) => this.isConnected(p.id));
     this.s.phase = "generating";
-    this.s.topic = classic ? classic.title : topic;
+    this.s.topic = classic ? classic.title : listUrl ? "Importing list…" : topic;
     this.persist();
     this.broadcast();
 
@@ -580,14 +583,20 @@ export class Room extends DurableObject<Env> {
       let list: TopTen;
       let key: string;
       let listDifficulty: Difficulty | null;
-      if (classic) {
+      if (listUrl) {
+        list = await importListUrl(listUrl);
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(list.source));
+        key = `imported:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+        listDifficulty = null;
+      } else if (classic) {
         list = { title: classic.title, basis: classic.basis, source: classic.source, answers: classic.answers };
         key = `classic:${classic.id}`;
         listDifficulty = null;
       } else {
-        key = cacheKey(topic, difficulty);
+        const preferLatestYear = msg.preferLatestYear === true;
+        key = cacheKey(topic, difficulty, preferLatestYear);
         listDifficulty = difficulty;
-        list = await this.getList(ws, topic, difficulty, key);
+        list = await this.getList(ws, topic, difficulty, key, preferLatestYear);
       }
       if (this.s.phase !== "generating") return;
 
@@ -607,7 +616,7 @@ export class Room extends DurableObject<Env> {
       console.error("generation failed:", err instanceof AiError ? `${err.message}` : err);
       this.s.phase = "lobby";
       this.s.topic = "";
-      this.toastAll(err instanceof AiError ? err.userMessage : "Couldn't build that list. Try again.", "error");
+      this.toastAll(err instanceof AiError ? err.userMessage : err instanceof Error ? err.message : "Couldn't build that list. Try again.", "error");
     }
     this.persist();
     this.broadcast();

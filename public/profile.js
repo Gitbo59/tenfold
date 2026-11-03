@@ -17,7 +17,7 @@
 
   const plink = (name) => `<a class="plink" href="#/u/${encodeURIComponent(name)}">${esc(name)}</a>`;
   const monthName = (ym) => { const d = new Date(`${ym}-01T00:00:00Z`); return isNaN(d) ? ym : d.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }); };
-  const playerNav = () => '<nav class="pl-nav" aria-label="Profile navigation"><a class="btn pl-back" href="#/ranked"><span aria-hidden="true">←</span> Back to Ranked</a></nav>';
+  const playerNav = () => '<nav class="pl-nav" aria-label="Profile navigation"><a class="btn pl-back" href="#/ranked" aria-label="Back to Ranked hub"><span class="pl-back-icon" aria-hidden="true">←</span><span>Ranked hub</span></a></nav>';
 
   // ==================================================================== your profile (settings)
   let savedAvatar = "0:0";

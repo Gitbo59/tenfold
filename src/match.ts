@@ -73,6 +73,28 @@ const GENERIC = new Set([
 
 const sig = (s: string): string[] => s.split(" ").filter((t) => t && !STOP.has(t));
 
+function singularForms(token: string): string[] {
+  const irregular: Record<string, string> = {
+    children: "child", feet: "foot", geese: "goose", men: "man", mice: "mouse", people: "person", teeth: "tooth", women: "woman",
+    indices: "index", oxen: "ox", phenomena: "phenomenon", criteria: "criterion", analyses: "analysis",
+  };
+  if (irregular[token]) return [irregular[token]];
+  if (["series", "species", "news", "mathematics", "physics", "politics", "economics", "measles"].includes(token)) return [token];
+  if (token.length > 4 && /[^aeiou]ies$/.test(token)) return [`${token.slice(0, -3)}y`];
+  if (token.length > 4 && /(?:ches|shes|xes|zes|sses)$/.test(token)) return [token.slice(0, -2)];
+  if (token.length > 4 && /ves$/.test(token)) return [`${token.slice(0, -3)}f`, `${token.slice(0, -3)}fe`];
+  if (token.length > 4 && /(?:oes|ses)$/.test(token)) return [token.slice(0, -2), token.slice(0, -1)];
+  if (token.length > 3 && /s$/.test(token) && !/(?:ss|us|is)$/.test(token)) return [token.slice(0, -1)];
+  return [token];
+}
+
+function singularFormsFor(input: string): string[] {
+  return input.split(" ").reduce<string[]>((forms, token) => {
+    const options = singularForms(token);
+    return forms.flatMap((form) => options.map((option) => `${form} ${option}`.trim())).slice(0, 32);
+  }, [""]);
+}
+
 function tokenEq(a: string, b: string): boolean {
   if (a === b) return true;
   const allowed = allowedDistance(Math.min(a.length, b.length));
@@ -91,16 +113,22 @@ function tokenEq(a: string, b: string): boolean {
 export function matchGuess(guessRaw: string, answers: Answer[]): Match {
   const g = normalize(guessRaw);
   if (!g) return { kind: "miss" };
+  const singularGuesses = new Set(singularFormsFor(g));
 
   const result = (index: number, exact: boolean): Match =>
     answers[index].found ? { kind: "dupe", index } : { kind: "hit", index, exact };
 
   // 1 and 2: exact or typo
   let best: { index: number; dist: number } | null = null;
+  const pluralCandidates = new Set<number>();
   answers.forEach((a, index) => {
     for (const form of [a.answer, ...a.aliases]) {
       const f = normalize(form);
       if (!f) continue;
+      if (singularFormsFor(f).some((form) => singularGuesses.has(form))) {
+        pluralCandidates.add(index);
+        continue;
+      }
       const allowed = allowedDistance(f.length);
       const d = levenshtein(g, f, allowed);
       if (d > allowed) continue;
@@ -112,6 +140,14 @@ export function matchGuess(guessRaw: string, answers: Answer[]): Match {
       if (better) best = { index, dist: d };
     }
   });
+  const currentBest = best as { index: number; dist: number } | null;
+  if (pluralCandidates.size > 1) {
+    if (currentBest?.dist === 0) return result(currentBest.index, true);
+    return { kind: "miss" };
+  }
+  if (pluralCandidates.size === 1 && (!currentBest || currentBest.dist > 0)) {
+    best = { index: [...pluralCandidates][0], dist: 0 };
+  }
   if (best) {
     const hit = best as { index: number; dist: number };
     return result(hit.index, hit.dist === 0);

@@ -47,7 +47,7 @@ Wrangler Preview deployments use the separate `previews` settings in `wrangler.j
 
 1. One player creates a room and shares the code or invite link (up to 8 players).
 2. The host sets **lives**, the **time limit** (on or off, 5 to 120 seconds a turn), the **list difficulty** (Easy or Hard) and how many **hints** the round allows (0 to 5).
-3. The host types a topic, taps a suggestion, or picks a built-in list. Answers stay on the server until they're found, so nobody can peek in dev tools.
+3. The host types a topic, taps a suggestion, picks a built-in list, or imports a ranked list from a public HTTPS webpage. The importer accepts ordered lists or tables with a rank column and ten distinct entries; it reports an error instead of silently switching to AI if the page cannot be imported. The optional **Prefer the latest year** setting asks AI for the current year when reliable data exists, otherwise the latest complete year. Answers stay on the server until they're found, so nobody can peek in dev tools.
 4. Players take turns. A right guess reveals the answer for everyone. A wrong guess, or running out of time, costs a life. At zero lives you're out.
 5. The round ends when the board is cleared or everyone is out. The last player standing keeps guessing until they run out of lives or finish the board.
 
@@ -88,7 +88,7 @@ A pill at the top centre switches between them (it hides while you're inside a g
   - **Ranked match:** the queue button, and a short "how ranked works" panel.
   - **Recent ranked games:** each opponent (with their picture and rating), the result, how many points you gained or lost, your rating afterwards, the list that was played and how it ended.
   - **Daily challenge:** today's status (not started, in progress, or your score and place), a button to play, and the daily and monthly leaderboards.
-  - **Friends:** add a friend by username, accept or decline requests, and see what your friends are up to (looking for a match, or in one).
+  - **Friends:** add a friend by username, accept or decline requests, see what your friends are up to (looking for a match, or in one), and invite them to either a rated Ranked match or an unranked casual game.
   - **Ranked ladder:** the top 20 by rating, with your own row added if you're further down.
 
 Clicking your picture or name on the hub opens **your profile** (`#/me`), and clicking anyone else's name anywhere (ladder, leaderboards, recent games, friends) opens **their profile** (`#/u/Username`).
@@ -172,7 +172,7 @@ A third mode, separate from the friends rooms and from the daily challenge. It h
 - **Ladder:** the top 20 by rating on the Ranked page, with your own row added if you're lower. Players appear after 3 rated games, and a `?` marks a still-provisional rating (under 20 games).
 - **Security:** a ranked room only lets in the two matched accounts, identified by their login cookie, and shows names from their accounts, so nobody can claim to be someone else.
 - **Fair play:** answers carry the same quiet typing signals as the daily challenge (plus a small flag for any answer sent without them, which means someone is calling the API directly). They're stored with the match for you to review and never shown to players. Ratings still apply when a match is flagged; you void a match if you confirm cheating.
-- **Cost:** a match uses no AI requests. Lists come from the built-in lists, past daily lists, and a pool that the scheduled job tops up by 2 a day (to 60). To fill the pool faster, run the seed call below. It uses the same small reserve as the daily list.
+- **Lists:** a match uses no AI requests. Lists come from the built-in lists, past daily lists, and a pool that the scheduled job tops up by 2 a day (to 60), using the same small reserve as the daily list. The pool prefers the current year when reliable data exists, otherwise the latest complete year; Ranked selects the newest data year available and falls back to older or undated lists when needed. To fill the pool faster, run the seed call below.
 - **No bots:** matchmaking only works while two people are searching at once. On a quiet site many people will wait without a match, so announce "ranked hours" or run the friends mode alongside until you have more players.
 
 Owner tools for ranked (same `ADMIN_TOKEN` as above):
@@ -200,11 +200,11 @@ Free-tier note: while someone waits in the queue their page asks the server for 
 - **Linked accounts:** every way you can sign in to the account. You can link a second provider (Google, GitHub, Discord) so any of them gets you into the same account, and unlink one at any time as long as at least one remains. Linking uses the same callback addresses you already registered for sign-in, so there's nothing new to set up with the providers. An account can't be merged with another one: if a provider account is already used elsewhere, linking is refused with an explanation. Accounts created before linking existed show their first method as "Original sign-in" until they next sign in.
 - **Privacy:** turn friend requests off, and choose whether your full profile (stats and recent games) is public or friends-only. Everyone can always see your username, picture and rating.
 
-**Friends:** send a request by username from the hub's Friends card or from someone's profile page. They can accept or decline; you can cancel a request you sent, and remove a friend at any time. If two people ask each other it becomes a friendship straight away. A declined request is quietly remembered for a week so the same person can't keep re-sending it, and the person who declined isn't told anything. Limits: 25 pending requests and 100 friends each.
+**Friends:** send a request by username from the hub's Friends card or from someone's profile page. They can accept or decline; you can cancel a request you sent, and remove a friend at any time. Friends can be invited to either a rated Ranked match or a casual room, with the sender choosing the mode. If two people ask each other it becomes a friendship straight away. A declined request is quietly remembered for a week so the same person can't keep re-sending it, and the person who declined isn't told anything. Limits: 25 pending requests and 100 friends each.
 
 **Other people's profiles** show their picture, username, rating, ladder position, member-since month, record, streak, rating trend and last five ranked games. Linked accounts and anything else private are never shown. A player with a friends-only profile shows strangers only their username, picture and rating.
 
-Deleting an account removes its username, rating, matches, daily results, linked sign-in methods and every friendship and request.
+Deleting an account removes its username, rating, matches, daily results, linked sign-in methods, friendships, requests and game invitations.
 
 ## Staying inside the free tier
 

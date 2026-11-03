@@ -206,6 +206,11 @@
               <input id="fr-add-name" maxlength="16" placeholder="Add a friend by username" aria-label="Friend's username">
               <button class="btn btn-small btn-primary" type="submit">Send request</button>
             </form>
+            <div id="fr-game-invites" hidden>
+              <h3 class="h3">Ranked game invitations</h3>
+              <ul id="fr-game-incoming" class="fr-list"></ul>
+              <ul id="fr-game-outgoing" class="fr-list"></ul>
+            </div>
             <div id="fr-requests" hidden>
               <h3 class="h3">Requests</h3>
               <ul id="fr-incoming" class="fr-list"></ul>
@@ -394,6 +399,14 @@
           <label class="field">
             <span class="field-label">What should the top ten be about?</span>
             <input id="topic" maxlength="120" placeholder="e.g. Best-selling video game consoles of all time">
+          </label>
+          <label class="field">
+            <span class="field-label">Or import a ranked list from a webpage</span>
+            <input id="list-url" type="url" maxlength="2048" placeholder="https://example.com/top-ten">
+          </label>
+          <label class="toggle-row latest-year-row">
+            <span class="toggle-text"><strong>Prefer the latest year</strong><span class="hint">Use the current year when reliable data is available; otherwise use the latest complete year.</span></span>
+            <input id="prefer-latest-year" class="switch" type="checkbox" role="switch">
           </label>
           <div class="topic-tools">
             <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>

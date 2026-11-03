@@ -700,6 +700,12 @@
       for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     }
   });
+  $("#list-url").addEventListener("input", () => {
+    if ($("#list-url").value.trim()) {
+      selectedClassic = null;
+      for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    }
+  });
   $("#btn-surprise").addEventListener("click", () => {
     selectedClassic = null;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
@@ -708,9 +714,11 @@
   });
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
+    const listUrl = $("#list-url").value.trim();
+    if (listUrl) return send({ t: "start", listUrl, preferLatestYear: $("#prefer-latest-year").checked });
     if (selectedClassic) return send({ t: "start", classic: selectedClassic });
     if (topic.length < 3) { toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error"); return $("#topic").focus(); }
-    send({ t: "start", topic });
+    send({ t: "start", topic, preferLatestYear: $("#prefer-latest-year").checked });
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });
 

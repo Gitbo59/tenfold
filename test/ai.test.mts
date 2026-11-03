@@ -1,4 +1,4 @@
-import { generateTopTen, AiError, DEFAULT_MODEL } from "../src/ai.ts";
+import { generateTopTen, AiError, cacheKey, DEFAULT_MODEL } from "../src/ai.ts";
 let failures = 0;
 const ok = (c: boolean, m: string) => { console.log(c ? "  PASS" : "  FAIL", m); if (!c) failures++; };
 
@@ -25,6 +25,13 @@ console.log("Workers AI path");
   ok(h.counts().reserves === 1 && h.counts().refunds === 0, "one request reserved, nothing refunded");
 }
 { const h = harness([{ response: list(10) }]); await generateTopTen(h.env, "t", "easy", h.hooks); ok(/Difficulty EASY/.test(h.calls[0].body.messages[0].content) && !/Difficulty HARD/.test(h.calls[0].body.messages[0].content), "easy prompt contains only the easy note"); }
+{
+  const h = harness([{ response: list(10) }]);
+  await generateTopTen(h.env, "annual sales", "easy", h.hooks, true);
+  const year = new Date().getUTCFullYear();
+  ok(new RegExp(String(year)).test(h.calls[0].body.messages[0].content) && new RegExp(String(year)).test(h.calls[0].body.messages[1].content), "latest-year preference asks for the current year and latest complete data");
+  ok(cacheKey("annual sales", "easy", true) !== cacheKey("annual sales", "easy"), "year-preferred lists use a separate cache key");
+}
 { const h = harness([{ response: "```json\n" + JSON.stringify(list(10)) + "\n```" }]); const r = await generateTopTen(h.env, "t", "easy", h.hooks); ok(r.answers.length === 10, "string response with markdown fences parsed"); }
 { const h = harness([{ response: "Sure! Here you go: " + JSON.stringify(list(10)) + " Hope that helps." }]); const r = await generateTopTen(h.env, "t", "easy", h.hooks); ok(r.answers.length === 10, "JSON embedded in chatter parsed"); }
 { const h = harness([{ choices: [{ message: { content: JSON.stringify(list(10)) } }] }]); const r = await generateTopTen(h.env, "t", "easy", h.hooks); ok(r.answers.length === 10, "OpenAI-style response body parsed"); }
