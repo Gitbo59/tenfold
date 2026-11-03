@@ -106,7 +106,8 @@ ok((await page("#/u/Quin2", null)).w.location.hash === "#/u/Quin2" && await (asy
 
 console.log("your profile screen");
 const me = await page("#/me", pat);
-ok(await me.until(() => /Signed in as Pat/.test(me.$("#me-sub").textContent)), "opens from the hub link and says who you are");
+ok(await me.until(() => me.$("#me-title").textContent === "Pat" && me.$("#me-sub").textContent === "Your profile"), "shows your username as the large profile heading");
+ok(me.$("#screen-me .me-back").classList.contains("pl-back") && !!me.$("#screen-me .me-back .pl-back-icon"), "your profile back button matches the Ranked hub button style");
 ok(me.$$("#av-colors .swatch").length === 12 && me.$$("#av-icons .swatch").length === 12 && !!me.$("#me-avatar svg"), "picture: 12 colours and 12 pictures, with a preview");
 me.click(me.$('#av-colors [data-color="3"]')); me.click(me.$('#av-icons [data-icon="5"]')); me.click(me.$("#av-save"));
 ok(await me.until(async () => true) && await (async () => { await sleep(500); return (await pat.json("/api/me")).avatar === "3:5"; })(), "choosing and saving a picture works");

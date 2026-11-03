@@ -447,6 +447,8 @@ input:disabled { opacity: 0.6; }
 .btn-danger:hover:not(:disabled) { background: rgba(255, 84, 104, 0.16); border-color: var(--bad); }
 .me-grid { display: grid; gap: 20px; align-items: start; }
 @media (min-width: 900px) { .me-grid { grid-template-columns: 1fr 1fr; } }
+.me-back { align-self: start; }
+.me-grid #me-name-form .btn[type="submit"] { margin-top: 12px; }
 .me-pic-row { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
 .me-pic-row .profile-avatar svg { width: 72px; height: 72px; display: block; }
 .me-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }

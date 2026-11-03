@@ -42,7 +42,8 @@
     if (q.get("linked") || q.get("linkerror")) history.replaceState(null, "", "/#/me");
     if (pr.error) return toast(pr.error, "error");
 
-    $("#me-sub").textContent = `Signed in as ${pr.name}.`;
+    $("#me-title").textContent = pr.name;
+    $("#me-sub").textContent = "Your profile";
     savedAvatar = pr.avatar;
     const [c, i] = pr.avatar.split(":").map(Number);
     pick = { color: c, icon: i };
