@@ -69,6 +69,7 @@ ok(ui.$("#mode-pill a[aria-current=page]").dataset.mode === "ranked", "the pill 
 
 console.log("the hub links to the profile screen; account buttons moved there");
 ok(ui.$("#rk-name").getAttribute("href") === "#/me" && ui.$("#rk-edit-profile").getAttribute("href") === "#/me" && ui.$(".profile-link[aria-label]").getAttribute("href") === "#/me", "your picture, name and an 'edit profile' button all open your profile");
+ok(ui.$("#rk-edit-profile").classList.contains("pl-back") && !!ui.$("#rk-edit-profile .pl-back-icon"), "the View your profile button uses the Ranked hub button style");
 ok(!ui.$("#rk-signout") && !ui.$("#rk-delete") && !ui.$("#rk-edit-avatar") && !ui.$("#ranked-account"), "sign out, delete and the picture editor are no longer on the hub");
 ok(!!ui.$("#fr-add-form") && /No friends yet/.test(ui.$("#fr-list").textContent), "the hub has a Friends card (empty to start with)");
 
@@ -103,7 +104,7 @@ console.log("result, then the profile updates");
 oppWs.send(JSON.stringify({ t: "resign" }));
 ok(await ui.until(() => !ui.$("#results").hidden && /You won/.test(ui.$("#res-title").textContent)), "when the opponent resigns, I see 'You won'");
 ok(await ui.until(() => /Rating 1200 → 1220 \(\+20\)/.test(ui.$("#res-rating").textContent)), "with the rating change: " + ui.$("#res-rating").textContent);
-ok(!ui.$("#btn-ranked-back").hidden && ui.$("#btn-rematch").hidden, "'Back to Ranked' is offered; no rematch");
+ok(!ui.$("#btn-ranked-back").hidden && ui.$("#btn-rematch").hidden && ui.$("#btn-ranked-back").classList.contains("pl-back") && !!ui.$("#btn-ranked-back .pl-back-icon"), "the styled Ranked hub button is offered; no rematch");
 ui.click(ui.$("#btn-ranked-back"));
 ok(await ui.until(() => !ui.$("#screen-ranked").hidden && ui.$("#rk-rating").textContent === "1220" && !ui.$("#mode-pill").hidden), "back on the hub my rating is 1220 and the pill is back");
 const stats = Object.fromEntries(ui.$$("#rk-stats .stat").map((s) => [s.querySelector(".stat-l").textContent, s.querySelector(".stat-n").textContent]));

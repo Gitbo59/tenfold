@@ -150,8 +150,8 @@
   function actionsHtml(p) {
     const b = (act, label, primary, extra = "") => `<button class="btn${primary ? " btn-primary" : ""}${extra}" type="button" data-act="${act}">${label}</button>`;
     switch (p.relationship) {
-      case "self": return '<a class="btn" href="#/me">Edit your profile</a>';
-      case "friends": return `<span class="friend-badge">Friends</span>${b("remove", "Remove friend", false, " btn-quiet")}<button class="btn btn-primary" type="button" data-challenge aria-expanded="false" aria-controls="profile-challenge-options">Challenge</button><span id="profile-challenge-options" class="challenge-options" hidden><button class="btn btn-small" type="button" data-play-mode="rated">Ranked</button><button class="btn btn-small" type="button" data-play-mode="casual">For fun</button></span>`;
+      case "self": return '<a class="btn pl-back" href="#/me"><span class="pl-back-icon" aria-hidden="true">↗</span><span>Edit your profile</span></a>';
+      case "friends": return `<span class="friend-badge">Friends</span>${b("remove", "Remove friend", false, " btn-quiet")}`;
       case "outgoing": return `<span class="hint">Request sent.</span>${b("cancel", "Cancel request", false)}`;
       case "incoming": return `<span class="hint">${esc(p.name)} wants to be friends.</span>${b("accept", "Accept", true)}${b("decline", "Decline", false)}`;
       default: return p.acceptsRequests ? b("request", "Add friend", true) : `<span class="hint">${esc(p.name)} isn't accepting friend requests.</span>`;
@@ -161,16 +161,18 @@
   function renderPlayer(p) {
     const rank = p.rank ? `<span class="pl-detail">Rank <strong>#${p.rank}</strong></span>` : "";
     const since = p.memberSince ? `<span class="pl-detail">member since <strong>${esc(monthName(p.memberSince))}</strong></span>` : "";
-    const head = `<header class="pl-head panel"><span class="profile-avatar">${T.avatar(p.avatar, 96)}</span><div class="pl-identity"><p class="pl-eyebrow">${playerStatus(p)}</p><h1 class="display profile-name">${esc(p.name)}</h1><div class="pl-details">${rank}${since}</div></div><div class="profile-rating"><span class="rating-big">${p.rating}</span><span class="hint">rating</span></div><div class="pl-actions">${actionsHtml(p)}</div></header>`;
+    const challenge = p.relationship === "friends" ? '<button class="btn btn-primary profile-challenge" type="button" data-challenge aria-haspopup="dialog" aria-controls="profile-challenge-dialog">Challenge</button>' : "";
+    const head = `<header class="pl-head panel"><span class="profile-avatar">${T.avatar(p.avatar, 96)}</span><div class="pl-identity"><p class="pl-eyebrow">${playerStatus(p)}</p><h1 class="display profile-name">${esc(p.name)}</h1><div class="pl-details">${rank}${since}</div></div><div class="profile-side">${challenge}<div class="profile-rating"><span class="rating-big">${p.rating}</span><span class="hint">rating</span></div></div><div class="pl-actions">${actionsHtml(p)}</div></header>`;
+    const challengeDialog = p.relationship === "friends" ? `<dialog id="profile-challenge-dialog" class="challenge-dialog" aria-labelledby="profile-challenge-title"><button class="challenge-close" type="button" data-close-challenge aria-label="Close challenge options">×</button><h2 class="h2" id="profile-challenge-title">Challenge ${esc(p.name)}</h2><p class="hint">Choose how you would like to play.</p><div class="challenge-dialog-options"><button class="btn btn-primary" type="button" data-play-mode="rated">Ranked</button><button class="btn" type="button" data-play-mode="casual">For fun</button></div></dialog>` : "";
     if (p.restricted) {
-      return `<div class="pl-page">${playerNav()}${head}<section class="panel pl-private"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section></div>`;
+      return `<div class="pl-page">${playerNav()}${head}<section class="panel pl-private"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section>${challengeDialog}</div>`;
     }
     const recent = p.recent.length
       ? p.recent.map((r) => `<div class="recent-row"><span class="recent-avatar">${T.avatar(r.opponent.avatar, 36)}</span><span class="recent-opponent"><span class="who">${plink(r.opponent.name)}</span><span class="recent-rating">${r.opponent.rating} rating</span></span>${badge(r.result)}<span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)} <span aria-hidden="true">·</span> ${T.ago(r.time)}</span></div>`).join("")
       : '<div class="pl-empty"><span class="pl-empty-mark" aria-hidden="true">—</span><p class="hint">No ranked games yet.</p></div>';
     const record = `<section class="panel pl-record"><h2 class="h2">Ranked record</h2><div class="stat-row">${T.statsHtml(p, p.streak || 0)}</div><div class="trend">${T.trendSvg(p.trend || [])}</div></section>`;
     const games = `<section class="panel pl-games"><h2 class="h2">Recent ranked games</h2>${recent}</section>`;
-    return `<div class="pl-page">${playerNav()}<div class="pl-summary">${head}${record}</div>${games}</div>`;
+    return `<div class="pl-page">${playerNav()}<div class="pl-summary">${head}${record}</div>${games}${challengeDialog}</div>`;
   }
 
   async function loadPlayer() {
@@ -189,9 +191,11 @@
     const challenge = e.target.closest("[data-challenge]");
     const playMode = e.target.closest("[data-play-mode]");
     if (challenge) {
-      const options = $("#profile-challenge-options");
-      options.hidden = !options.hidden;
-      challenge.setAttribute("aria-expanded", String(!options.hidden));
+      $("#profile-challenge-dialog").showModal();
+      return;
+    }
+    if (e.target.closest("[data-close-challenge]")) {
+      $("#profile-challenge-dialog").close();
       return;
     }
     if (playMode) {
@@ -203,8 +207,7 @@
         playMode.disabled = false;
       } else {
         toast(`${mode === "rated" ? "Ranked" : "For fun"} game invitation sent.`);
-        $("#profile-challenge-options").hidden = true;
-        $("#pl-body [data-challenge]")?.setAttribute("aria-expanded", "false");
+        $("#profile-challenge-dialog").close();
       }
       return;
     }

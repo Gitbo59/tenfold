@@ -29,6 +29,8 @@ async function page(hash, browser) {
   const w = dom.window;
   w.fetch = (u, o = {}) => { const headers = { ...(o.headers || {}) }; if (browser) headers.cookie = browser.cookie(); if (o.method === "POST") headers.Origin = BASE; return fetch(new URL(u, BASE), { ...o, headers, redirect: "manual" }); };
   w.confirm = () => true;
+  w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  w.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
   for (const code of src) w.eval(code);
   const $ = (s) => w.document.querySelector(s); const $$ = (s) => [...w.document.querySelectorAll(s)];
   const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch {} await sleep(40); } return false; };
@@ -72,11 +74,14 @@ ok(pp.$("#pl-body .pl-nav .pl-back")?.getAttribute("href") === "#/ranked" && pp.
 ok(/1200/.test(pp.$("#pl-body .rating-big").textContent) && /Provisional rating/.test(pp.$("#pl-body").textContent) && /member since/.test(pp.$("#pl-body").textContent), "with their rating and member-since");
 ok(pp.$("#pl-body .pl-summary .pl-head") && pp.$("#pl-body .pl-summary .pl-record") && pp.$("#pl-body .pl-games") && (pp.$("#pl-body .pl-summary").compareDocumentPosition(pp.$("#pl-body .pl-games")) & 4), "ranked record shares the profile overview and recent games sit below it");
 ok(!!pp.$(".friend-badge") && !!pp.$("[data-act=remove]") && pp.$$("#pl-body .stat").length === 5 && /No ranked games yet/.test(pp.$("#pl-body").textContent), "a friend: badge, Remove button, full stats and recent games");
-ok(!!pp.$("#pl-body [data-challenge]") && pp.$("#profile-challenge-options").hidden, "the friend's profile has a Challenge button with hidden mode choices");
+ok(!!pp.$("#pl-body .profile-side [data-challenge]") && !!pp.$("#profile-challenge-dialog") && !pp.$("#profile-challenge-dialog").hasAttribute("open") && (pp.$("#pl-body .profile-side [data-challenge]").compareDocumentPosition(pp.$("#pl-body .profile-rating")) & 4), "the Challenge button is top-right and its options are in a closed dialog");
 pp.click(pp.$("#pl-body [data-challenge]"));
-ok(await pp.until(() => pp.$$("#profile-challenge-options [data-play-mode]").map((b) => b.textContent).join("|") === "Ranked|For fun"), "Challenge on the friend's profile reveals both modes");
-pp.click(pp.$('#profile-challenge-options [data-play-mode="casual"]'));
-ok(await pp.until(() => /For fun game invitation sent/.test(pp.$("#toasts").textContent)), "choosing For fun sends the invitation from the friend's profile");
+ok(await pp.until(() => pp.$("#profile-challenge-dialog").hasAttribute("open") && pp.$$("#profile-challenge-dialog [data-play-mode]").map((b) => b.textContent).join("|") === "Ranked|For fun"), "Challenge opens a popup with both modes");
+pp.click(pp.$("#profile-challenge-dialog [data-close-challenge]"));
+ok(await pp.until(() => !pp.$("#profile-challenge-dialog").hasAttribute("open")), "the challenge popup can be dismissed without changing the page");
+pp.click(pp.$("#pl-body [data-challenge]"));
+pp.click(pp.$('#profile-challenge-dialog [data-play-mode="casual"]'));
+ok(await pp.until(() => /For fun game invitation sent/.test(pp.$("#toasts").textContent) && !pp.$("#profile-challenge-dialog").hasAttribute("open")), "choosing For fun sends the invitation and closes the popup");
 const profileInvite = (await pat.json("/api/friends")).outgoingInvites.find((invite) => invite.name === "Quin2");
 ok(profileInvite?.mode === "casual", "the outgoing invitation targets the profile being viewed");
 if (profileInvite) await pat.post("/api/ranked/invites/cancel", { id: profileInvite.id });
@@ -90,7 +95,7 @@ ok(await pp.until(() => !!pp.$(".friend-badge")), "(and accepting on their side 
 await pp.go("#/u/Rae");
 ok(await pp.until(() => /Rae/.test(pp.$("#pl-body .profile-name").textContent)), "opening another profile from the address works");
 await pp.go("#/u/Pat");
-ok(await pp.until(() => /Pat/.test(pp.$("#pl-body .profile-name").textContent) && pp.$("#pl-body .pl-actions a").getAttribute("href") === "#/me"), "your own profile page offers 'Edit your profile'");
+ok(await pp.until(() => /Pat/.test(pp.$("#pl-body .profile-name").textContent) && pp.$("#pl-body .pl-actions a").getAttribute("href") === "#/me" && pp.$("#pl-body .pl-actions a").classList.contains("pl-back")), "your own profile page offers a styled 'Edit your profile' button");
 await pp.go("#/u/Sam");
 ok(await pp.until(() => /Private profile/.test(pp.$("#pl-body").textContent) && pp.$$("#pl-body .stat").length === 0 && /1200/.test(pp.$("#pl-body .rating-big").textContent)), "a private profile shows only name, picture and rating to non-friends");
 await pp.go("#/u/Tom1");

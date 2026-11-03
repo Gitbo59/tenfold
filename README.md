@@ -88,7 +88,7 @@ A pill at the top centre switches between them (it hides while you're inside a g
   - **Ranked match:** the queue button, and a short "how ranked works" panel.
   - **Recent ranked games:** each opponent (with their picture and rating), the result, how many points you gained or lost, your rating afterwards, the list that was played and how it ended.
   - **Daily challenge:** today's status (not started, in progress, or your score and place), a button to play, and the daily and monthly leaderboards.
-  - **Friends:** add a friend by username, accept or decline requests, see what your friends are up to (looking for a match, or in one), and use **Challenge** to choose a rated Ranked match or a For fun game. Accepting a For fun challenge brings both players into a normal configurable room.
+  - **Friends:** add a friend by username, accept or decline requests, see what your friends are up to (looking for a match, or in one), and open a friend's profile to use the top-right **Challenge** button. Its popup lets you choose a rated Ranked match or a For fun game. Accepting a For fun challenge brings both players into a normal configurable room.
   - **Ranked ladder:** the top 20 by rating, with your own row added if you're further down.
 
 Clicking your picture or name on the hub opens **your profile** (`#/me`), and clicking anyone else's name anywhere (ladder, leaderboards, recent games, friends) opens **their profile** (`#/u/Username`).

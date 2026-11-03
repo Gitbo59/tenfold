@@ -482,6 +482,8 @@ input:disabled { opacity: 0.6; }
 }
 .pl-head .profile-avatar svg { width: 96px; height: 96px; display: block; }
 .pl-identity { min-width: 0; display: grid; gap: 8px; }
+.profile-side { display: grid; justify-items: end; gap: 8px; }
+.profile-challenge { justify-self: end; }
 .pl-eyebrow { color: var(--bulb); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
 .pl-identity .profile-name { line-height: 1; }
 .pl-details { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -491,6 +493,12 @@ input:disabled { opacity: 0.6; }
 .pl-head .rating-big { font-size: clamp(2.6rem, 5vw, 3.4rem); }
 .pl-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 16px; border-top: 1px solid var(--line); }
 .friend-badge { background: rgba(34, 214, 162, 0.18); color: var(--ok); font-weight: 700; padding: 6px 14px; border-radius: 999px; }
+.challenge-dialog { position: fixed; inset: 0; width: min(390px, calc(100vw - 32px)); margin: auto; padding: 28px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--chalk); box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55); }
+.challenge-dialog::backdrop { background: rgba(5, 9, 40, 0.78); }
+.challenge-dialog .h2 { margin: 0 32px 8px 0; }
+.challenge-dialog-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.challenge-close { position: absolute; top: 10px; right: 12px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--chalk); font-size: 1.6rem; cursor: pointer; }
+.challenge-close:hover { background: rgba(255, 255, 255, 0.1); }
 .pl-private { display: grid; gap: 4px; }
 .pl-summary { display: grid; gap: 20px; align-items: stretch; }
 .pl-record, .pl-games { min-width: 0; }
@@ -517,7 +525,8 @@ input:disabled { opacity: 0.6; }
   .pl-head { grid-template-columns: 64px minmax(0, 1fr); gap: 10px 14px; }
   .pl-head .profile-avatar { grid-row: 1 / span 2; }
   .pl-head .profile-avatar svg { width: 64px; height: 64px; }
-  .pl-head .profile-rating { grid-column: 2; display: flex; justify-items: start; align-items: baseline; gap: 8px; min-width: 0; padding: 0; border: 0; }
+  .pl-head .profile-side { grid-column: 2; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+  .pl-head .profile-rating { display: flex; justify-items: start; align-items: baseline; gap: 8px; min-width: 0; padding: 0; border: 0; }
   .pl-head .rating-big { font-size: 2rem; }
   .pl-actions { grid-column: 1 / -1; }
   .recent-row { grid-template-columns: 32px minmax(0, 1fr) auto 46px; gap: 4px 8px; }
