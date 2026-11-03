@@ -17,6 +17,7 @@
 
   const plink = (name) => `<a class="plink" href="#/u/${encodeURIComponent(name)}">${esc(name)}</a>`;
   const monthName = (ym) => { const d = new Date(`${ym}-01T00:00:00Z`); return isNaN(d) ? ym : d.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }); };
+  const playerNav = () => '<nav class="pl-nav" aria-label="Profile navigation"><a class="btn pl-back" href="#/ranked"><span aria-hidden="true">←</span> Back to Ranked</a></nav>';
 
   // ==================================================================== your profile (settings)
   let savedAvatar = "0:0";
@@ -162,12 +163,12 @@
     const since = p.memberSince ? `<span class="pl-detail">member since <strong>${esc(monthName(p.memberSince))}</strong></span>` : "";
     const head = `<header class="pl-head panel"><span class="profile-avatar">${T.avatar(p.avatar, 96)}</span><div class="pl-identity"><p class="pl-eyebrow">${playerStatus(p)}</p><h1 class="display profile-name">${esc(p.name)}</h1><div class="pl-details">${rank}${since}</div></div><div class="profile-rating"><span class="rating-big">${p.rating}</span><span class="hint">rating</span></div><div class="pl-actions">${actionsHtml(p)}</div></header>`;
     if (p.restricted) {
-      return `<div class="pl-page">${head}<section class="panel pl-private"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section></div>`;
+      return `<div class="pl-page">${playerNav()}${head}<section class="panel pl-private"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section></div>`;
     }
     const recent = p.recent.length
       ? p.recent.map((r) => `<div class="recent-row"><span class="recent-avatar">${T.avatar(r.opponent.avatar, 36)}</span><span class="recent-opponent"><span class="who">${plink(r.opponent.name)}</span><span class="recent-rating">${r.opponent.rating} rating</span></span>${badge(r.result)}<span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)} <span aria-hidden="true">·</span> ${T.ago(r.time)}</span></div>`).join("")
       : '<div class="pl-empty"><span class="pl-empty-mark" aria-hidden="true">—</span><p class="hint">No ranked games yet.</p></div>';
-    return `<div class="pl-page">${head}<div class="pl-grid"><section class="panel pl-record"><h2 class="h2">Ranked record</h2><div class="stat-row">${T.statsHtml(p, p.streak || 0)}</div><div class="trend">${T.trendSvg(p.trend || [])}</div></section><section class="panel pl-games"><h2 class="h2">Recent ranked games</h2>${recent}</section></div></div>`;
+    return `<div class="pl-page">${playerNav()}${head}<div class="pl-grid"><section class="panel pl-record"><h2 class="h2">Ranked record</h2><div class="stat-row">${T.statsHtml(p, p.streak || 0)}</div><div class="trend">${T.trendSvg(p.trend || [])}</div></section><section class="panel pl-games"><h2 class="h2">Recent ranked games</h2>${recent}</section></div></div>`;
   }
 
   async function loadPlayer() {
@@ -178,7 +179,7 @@
     body.innerHTML = '<p class="hint">Loading…</p>';
     const p = await api(`/api/players/${encodeURIComponent(viewing)}`);
     body.innerHTML = p.error
-      ? `<section class="panel"><h2 class="h2">Player not found</h2><p class="hint">${esc(p.error)}</p></section>`
+      ? `${playerNav()}<section class="panel"><h2 class="h2">Player not found</h2><p class="hint">${esc(p.error)}</p></section>`
       : renderPlayer(p);
   }
 

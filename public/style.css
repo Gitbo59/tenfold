@@ -462,6 +462,10 @@ input:disabled { opacity: 0.6; }
 .fr-name .plink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-actions { display: flex; gap: 6px; }
 .pl-page { display: grid; gap: 20px; }
+.pl-nav { display: flex; align-items: center; }
+.pl-back { display: inline-flex; align-items: center; gap: 9px; padding: 9px 16px; border-color: var(--line); background: rgba(10, 18, 72, 0.55); color: var(--chalk); text-decoration: none; }
+.pl-back span { color: var(--bulb); font-size: 1.15rem; line-height: 1; transition: transform 0.15s; }
+.pl-back:hover span { transform: translateX(-3px); }
 .pl-head {
   display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 12px 20px;
   margin: 6px 0 0; padding: clamp(18px, 3vw, 28px);

@@ -67,6 +67,7 @@ ok(hub.$("#fr-list a.plink").getAttribute("href") === "#/u/Quin2", "friends' nam
 console.log("another player's profile");
 const pp = await page("#/u/Quin2", pat);
 ok(await pp.until(() => /Quin2/.test(pp.$("#pl-body").textContent) && !!pp.$("#pl-body svg.av")), "opens from the link and shows their name and picture");
+ok(pp.$("#pl-body .pl-nav .pl-back")?.getAttribute("href") === "#/ranked" && pp.$("#pl-body .pl-nav").compareDocumentPosition(pp.$("#pl-body .pl-head")) & 4, "Back to Ranked is a button-like control above the profile header");
 ok(/1200/.test(pp.$("#pl-body .rating-big").textContent) && /Provisional rating/.test(pp.$("#pl-body").textContent) && /member since/.test(pp.$("#pl-body").textContent), "with their rating and member-since");
 ok(!!pp.$(".friend-badge") && !!pp.$("[data-act=remove]") && pp.$$("#pl-body .stat").length === 5 && /No ranked games yet/.test(pp.$("#pl-body").textContent), "a friend: badge, Remove button, full stats and recent games");
 pp.click(pp.$("[data-act=remove]"));
