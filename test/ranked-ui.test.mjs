@@ -111,7 +111,8 @@ const stats = Object.fromEntries(ui.$$("#rk-stats .stat").map((s) => [s.querySel
 ok(stats["Peak rating"] === "1220" && stats["Game"] === "1" && stats["Win rate"] === "100%" && stats["Won-lost-drawn"] === "1-0-0" && stats["Current streak"] === "1 W", "stats update: " + JSON.stringify(stats));
 ok(/#1 on the ladder/.test(ui.$("#rk-sub").textContent) && !!ui.$("#rk-trend polyline") && !!ui.$("#rk-trend .chart-grid") && !!ui.$("#rk-trend .chart-point.current"), "my ladder position and detailed rating trend appear");
 const row = ui.$("#rk-recent .recent-row");
-ok(!!row && /Opp/.test(row.textContent) && row.querySelector(".badge.win") && /\+20/.test(row.querySelector(".delta").textContent) && /now 1220/.test(row.textContent) && !!row.querySelector("svg.av"), "recent games: opponent, avatar, WIN, +20, rating after: " + (row && row.textContent.replace(/\s+/g, " ").slice(0, 100)));
+ok(!!row && /Opp/.test(row.textContent) && row.querySelector(".badge.win") && /\+20/.test(row.querySelector(".delta").textContent) && /now 1220/.test(row.querySelector(".meta").textContent) && row.querySelector(".meta").nextElementSibling.classList.contains("recent-time") && !row.querySelector(".meta").textContent.includes("ago") && !!row.querySelector("svg.av"), "recent games show category, rating change, rating after, and a separate time element");
+ok(row.querySelector(".badge").textContent === "WIN" && row.querySelector(".badge").classList.contains("badge"), "the result uses the shared fixed-size WIN/LOSS/DRAW badge style");
 const rows = ui.$$("#rk-ladder-body tbody tr");
 ok(rows.length === 2 && /UiRanked/.test(rows[0].textContent) && /1220/.test(rows[0].textContent) && /Opp/.test(rows[1].textContent) && /1180/.test(rows[1].textContent) && rows.every((r) => r.querySelector("svg.av")) && /\(you\)/.test(rows[0].textContent), "the ladder lists both with avatars, best first, and marks me");
 oppWs.close();

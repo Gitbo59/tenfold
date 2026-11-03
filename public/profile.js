@@ -169,7 +169,7 @@
       return `<div class="pl-page">${playerNav()}${head}<section class="panel pl-private"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section>${challengeDialog}</div>`;
     }
     const recent = p.recent.length
-      ? p.recent.map((r) => `<div class="recent-row"><span class="recent-avatar">${T.avatar(r.opponent.avatar, 36)}</span><span class="recent-opponent"><span class="who">${plink(r.opponent.name)}</span><span class="recent-rating">${r.opponent.rating} rating</span></span>${badge(r.result)}<span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)} <span aria-hidden="true">·</span> ${T.ago(r.time)}</span></div>`).join("")
+      ? p.recent.map((r) => `<div class="recent-row"><span class="recent-avatar">${T.avatar(r.opponent.avatar, 36)}</span><span class="recent-opponent"><span class="who">${plink(r.opponent.name)}</span><span class="recent-rating">${r.opponent.rating} rating</span></span>${badge(r.result)}<span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)}</span><span class="recent-time">${T.ago(r.time)}</span></div>`).join("")
       : '<div class="pl-empty"><span class="pl-empty-mark" aria-hidden="true">—</span><p class="hint">No ranked games yet.</p></div>';
     const record = `<section class="panel pl-record"><h2 class="h2">Ranked record</h2><div class="stat-row">${T.statsHtml(p, p.streak || 0)}</div><div class="trend">${T.trendSvg(p.trend || [])}</div></section>`;
     const games = `<section class="panel pl-games"><h2 class="h2">Recent ranked games</h2>${recent}</section>`;

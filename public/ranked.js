@@ -156,7 +156,7 @@
       ? rows
           .map(
             (r) =>
-              `<div class="recent-row"><span>${T.avatar(r.opponent.avatar, 32)}</span><span class="who">${plink(r.opponent.name)}<span class="rating">${r.opponent.rating}</span></span><span class="badge ${r.result}">${r.result === "win" ? "WIN" : r.result === "loss" ? "LOSS" : "DRAW"}</span><span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)}. ${reasonText(r)}, now ${r.ratingAfter}, ${ago(r.time)}</span></div>`,
+              `<div class="recent-row"><span>${T.avatar(r.opponent.avatar, 32)}</span><span class="who">${plink(r.opponent.name)}<span class="rating">${r.opponent.rating}</span></span><span class="badge ${r.result}">${r.result === "win" ? "WIN" : r.result === "loss" ? "LOSS" : "DRAW"}</span><span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)}. ${reasonText(r)}, now ${r.ratingAfter}</span><span class="recent-time">${ago(r.time)}</span></div>`,
           )
           .join("")
       : '<p class="hint">No ranked games yet. Find a match to get your first rating.</p>';
