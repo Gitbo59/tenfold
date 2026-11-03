@@ -151,7 +151,7 @@
     const b = (act, label, primary, extra = "") => `<button class="btn${primary ? " btn-primary" : ""}${extra}" type="button" data-act="${act}">${label}</button>`;
     switch (p.relationship) {
       case "self": return '<a class="btn" href="#/me">Edit your profile</a>';
-      case "friends": return `<span class="friend-badge">Friends</span>${b("remove", "Remove friend", false, " btn-quiet")}`;
+      case "friends": return `<span class="friend-badge">Friends</span>${b("remove", "Remove friend", false, " btn-quiet")}<button class="btn btn-primary" type="button" data-challenge aria-expanded="false" aria-controls="profile-challenge-options">Challenge</button><span id="profile-challenge-options" class="challenge-options" hidden><button class="btn btn-small" type="button" data-play-mode="rated">Ranked</button><button class="btn btn-small" type="button" data-play-mode="casual">For fun</button></span>`;
       case "outgoing": return `<span class="hint">Request sent.</span>${b("cancel", "Cancel request", false)}`;
       case "incoming": return `<span class="hint">${esc(p.name)} wants to be friends.</span>${b("accept", "Accept", true)}${b("decline", "Decline", false)}`;
       default: return p.acceptsRequests ? b("request", "Add friend", true) : `<span class="hint">${esc(p.name)} isn't accepting friend requests.</span>`;
@@ -186,6 +186,28 @@
   }
 
   $("#pl-body").addEventListener("click", async (e) => {
+    const challenge = e.target.closest("[data-challenge]");
+    const playMode = e.target.closest("[data-play-mode]");
+    if (challenge) {
+      const options = $("#profile-challenge-options");
+      options.hidden = !options.hidden;
+      challenge.setAttribute("aria-expanded", String(!options.hidden));
+      return;
+    }
+    if (playMode) {
+      playMode.disabled = true;
+      const mode = playMode.dataset.playMode;
+      const r = await api("/api/ranked/invites", { name: viewing, mode });
+      if (r.error) {
+        toast(r.error, "error");
+        playMode.disabled = false;
+      } else {
+        toast(`${mode === "rated" ? "Ranked" : "For fun"} game invitation sent.`);
+        $("#profile-challenge-options").hidden = true;
+        $("#pl-body [data-challenge]")?.setAttribute("aria-expanded", "false");
+      }
+      return;
+    }
     const b = e.target.closest("[data-act]");
     if (!b) return;
     if (b.dataset.act === "remove" && !confirm(`Remove ${viewing} from your friends?`)) return;

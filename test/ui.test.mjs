@@ -31,7 +31,7 @@ const code = $$("#room-code span").map((s) => s.textContent).join("");
 
 console.log("lobby controls");
 ok($$("#classics .chip").length === 6, "six built-in lists offered");
-ok($("#list-url").type === "url" && $("#prefer-latest-year").type === "checkbox", "For fun lobby offers webpage import and a latest-year preference");
+ok($("#list-url").type === "url" && $("#prefer-latest-year").type === "checkbox" && $("#prefer-latest-year").closest(".settings"), "the latest-year preference sits with match settings");
 ok(await until(() => /Free AI lists left today: \d+ of \d+/.test($("#budget-note").textContent)), "host sees the free-AI budget note: " + $("#budget-note").textContent.slice(0, 60));
 ok($$(".seg").length === 2 && $(".seg[data-diff=easy]").getAttribute("aria-checked") === "true", "difficulty defaults to Easy");
 ok($("#hints-val").textContent === "3", "hints default to 3");
@@ -50,7 +50,9 @@ bsend({ t: "promote", targetId: w.sessionStorage.getItem("tf_pid") });
 ok(await until(() => bobState && bobState.hostId !== bobPid && !!$("#lobby-players [data-promote]")), "the new leader can promote the original leader back");
 
 click($(".seg[data-diff=hard]"));
-ok(await until(() => bobState && bobState.config.difficulty === "hard") && $(".seg[data-diff=hard]").getAttribute("aria-checked") === "true", "Hard selected; the other player sees it");
+ok($(".seg[data-diff=hard]").getAttribute("aria-checked") === "true" && bobState.config.difficulty === undefined, "Hard changes the suggested topic category, not shared match settings");
+$("#prefer-latest-year").checked = true; $("#prefer-latest-year").dispatchEvent(new w.Event("change", { bubbles: true }));
+ok(await until(() => bobState && bobState.config.preferLatestYear === true), "latest-year preference syncs with the other match settings");
 click($("#hints-inc")); click($("#hints-inc"));
 ok(await until(() => bobState.config.hints === 5) && $("#hints-val").textContent === "5" && $("#hints-inc").disabled, "hints stepper: two quick taps give 5 and cap at 5");
 click($("#hints-dec")); click($("#hints-dec")); click($("#hints-dec"));
@@ -122,13 +124,14 @@ click($("#btn-rematch"));
 ok(await until(() => visible("#screen-lobby")) && $$("#classics .chip").length === 6, "back in the lobby with built-in lists offered again");
 
 console.log("AI round with Hard difficulty");
-$("#topic").value = "NATO alphabet"; $("#topic").dispatchEvent(new w.Event("input", { bubbles: true }));
+click($(".seg[data-diff=hard]"));
+click($("#topic-chips .chip"));
 click($("#btn-start"));
 ok(await until(() => visible("#screen-game"), 8000), "AI list starts a game");
 ok(/\(hard list\)/.test($("#g-basis").textContent), "header labels it a hard list: " + $("#g-basis").textContent);
 ok($("#source-line").hidden, "the source starts hidden again in the next game");
 click($("#btn-source"));
-ok(/AI-suggested source, not verified/.test($("#source-line").textContent) && /Wikipedia: NATO phonetic alphabet/.test($("#source-line").textContent), "AI source is clearly labelled as unverified");
+ok(/AI-suggested source, not verified/.test($("#source-line").textContent), "AI source is clearly labelled as unverified");
 
 click($("#btn-leave")); ok(visible("#screen-home"), "leave returns home");
 ok(errors.length === 0, "no script errors" + (errors.length ? ": " + errors.join(" | ") : ""));

@@ -33,7 +33,9 @@
     "Highest-grossing anime films", "Largest islands in the Mediterranean", "Longest-reigning monarchs in history",
     "Most prolific chess grandmasters by rating", "Largest airports by passenger traffic", "Tallest waterfalls in Europe",
   ];
-  const pool = () => (state && state.config.difficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
+  let suggestionDifficulty = "easy";
+  let selectedSuggestionDifficulty = null;
+  const pool = () => (suggestionDifficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
   const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
 
   // ------------------------------------------------------------------ state
@@ -59,7 +61,6 @@
   let audioContext = null;
   let configTimer = null;
   let selectedClassic = null;
-  let chipsFor = null;
   let classicsKey = "";
   let budgetAt = 0;
   let showSource = false; // per game: opening it is announced to the room, so it is never remembered
@@ -210,7 +211,7 @@
       try { ws.close(1000, "leave"); } catch {}
     }
     ws = null; state = null; code = null; joinSent = false; lastTurnPid = null; lastLogId = null;
-    selectedClassic = null; classicsKey = ""; chipsFor = null;
+    selectedClassic = null; classicsKey = ""; selectedSuggestionDifficulty = null;
     animated.clear(); myReports.clear();
     sessionStorage.removeItem("tf_room");
     history.replaceState(null, "", "/");
@@ -320,7 +321,6 @@
   }
 
   function renderChips() {
-    chipsFor = state ? state.config.difficulty : "easy";
     $("#topic-chips").innerHTML = pick(4).map((t) => `<button class="chip" type="button">${esc(t)}</button>`).join("");
   }
 
@@ -363,8 +363,8 @@
     const lives = effective("lives", c.lives);
     const timerEnabled = effective("timer", c.timerEnabled);
     const seconds = effective("seconds", c.turnSeconds);
-    const difficulty = effective("difficulty", c.difficulty);
     const hints = effective("hints", c.hints);
+    const preferLatestYear = effective("preferLatestYear", c.preferLatestYear);
 
     $("#lives-val").textContent = lives;
     $("#lives-dec").disabled = !isHost || lives <= 1;
@@ -379,8 +379,11 @@
     $("#timer-val").textContent = `${seconds} seconds`;
     $("#range-row").dataset.off = String(!timerEnabled);
 
+    const latestYear = $("#prefer-latest-year");
+    latestYear.checked = preferLatestYear;
+    latestYear.disabled = !isHost;
     for (const b of $$(".seg")) {
-      b.setAttribute("aria-checked", String(b.dataset.diff === difficulty));
+      b.setAttribute("aria-checked", String(b.dataset.diff === suggestionDifficulty));
       b.disabled = !isHost;
     }
     $("#hints-val").textContent = hints;
@@ -396,14 +399,6 @@
     $("#budget-note").hidden = !isHost;
     $("#btn-start").hidden = !isHost;
     $("#wait-note").hidden = isHost;
-    if (chipsFor !== difficulty) {
-      // chips follow the selected difficulty
-      const prev = state.config.difficulty;
-      state.config.difficulty = difficulty;
-      renderChips();
-      state.config.difficulty = prev;
-      chipsFor = difficulty;
-    }
     renderClassics(s.classics);
     if (isHost) refreshBudget();
   }
@@ -695,6 +690,11 @@
     render();
     pushConfig({ timerEnabled: e.target.checked });
   });
+  $("#prefer-latest-year").addEventListener("change", (e) => {
+    setPending("preferLatestYear", e.target.checked);
+    render();
+    pushConfig({ preferLatestYear: e.target.checked });
+  });
   $("#timer-sec").addEventListener("input", (e) => {
     const value = Number(e.target.value);
     setPending("seconds", value);
@@ -705,9 +705,10 @@
   for (const b of $$(".seg")) {
     b.addEventListener("click", () => {
       if (b.disabled) return;
-      setPending("difficulty", b.dataset.diff);
-      render();
-      pushConfig({ difficulty: b.dataset.diff });
+      suggestionDifficulty = b.dataset.diff;
+      if (selectedSuggestionDifficulty) selectedSuggestionDifficulty = suggestionDifficulty;
+      for (const button of $$(".seg")) button.setAttribute("aria-checked", String(button === b));
+      renderChips();
     });
   }
 
@@ -715,6 +716,7 @@
     const b = e.target.closest(".chip");
     if (!b) return;
     selectedClassic = null;
+    selectedSuggestionDifficulty = suggestionDifficulty;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     $("#topic").value = b.textContent;
     $("#topic").focus();
@@ -723,10 +725,12 @@
     const b = e.target.closest(".chip");
     if (!b) return;
     selectedClassic = b.dataset.id;
+    selectedSuggestionDifficulty = null;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", String(c === b));
     $("#topic").value = b.dataset.title;
   });
   $("#topic").addEventListener("input", () => {
+    selectedSuggestionDifficulty = null;
     const chosen = selectedClassic && $(`#classics .chip[data-id="${selectedClassic}"]`);
     if (!chosen || chosen.dataset.title !== $("#topic").value.trim()) {
       selectedClassic = null;
@@ -734,6 +738,7 @@
     }
   });
   $("#list-url").addEventListener("input", () => {
+    selectedSuggestionDifficulty = null;
     if ($("#list-url").value.trim()) {
       selectedClassic = null;
       for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
@@ -741,6 +746,7 @@
   });
   $("#btn-surprise").addEventListener("click", () => {
     selectedClassic = null;
+    selectedSuggestionDifficulty = suggestionDifficulty;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     $("#topic").value = pick(1)[0];
     renderChips();
@@ -748,10 +754,10 @@
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
     const listUrl = $("#list-url").value.trim();
-    if (listUrl) return send({ t: "start", listUrl, preferLatestYear: $("#prefer-latest-year").checked });
+    if (listUrl) return send({ t: "start", listUrl });
     if (selectedClassic) return send({ t: "start", classic: selectedClassic });
     if (topic.length < 3) { toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error"); return $("#topic").focus(); }
-    send({ t: "start", topic, preferLatestYear: $("#prefer-latest-year").checked });
+    send({ t: "start", topic, ...(selectedSuggestionDifficulty ? { difficulty: selectedSuggestionDifficulty } : {}) });
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });
 

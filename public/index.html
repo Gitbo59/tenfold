@@ -372,17 +372,6 @@
 
           <div class="setting">
             <div class="setting-text">
-              <span class="setting-name" id="diff-label">List difficulty</span>
-              <span class="hint">Easy lists use well-known answers. Hard lists make you think.</span>
-            </div>
-            <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
-              <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
-              <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
-            </div>
-          </div>
-
-          <div class="setting">
-            <div class="setting-text">
               <label class="setting-name" for="hints-val">Hints per game</label>
               <span class="hint">A hint unlocks when every player still in the game votes for one.</span>
             </div>
@@ -392,6 +381,14 @@
               <button id="hints-inc" class="step" type="button" aria-label="More hints">+</button>
             </div>
           </div>
+
+          <label class="setting">
+            <span class="setting-text">
+              <span class="setting-name">Prefer the latest year</span>
+              <span class="hint">AI lists favor current-year data when reliable, or the latest complete year.</span>
+            </span>
+            <input id="prefer-latest-year" class="switch" type="checkbox" role="switch">
+          </label>
         </div>
 
         <div class="panel topic" id="topic-panel">
@@ -404,11 +401,17 @@
             <span class="field-label">Or import a ranked list from a webpage</span>
             <input id="list-url" type="url" maxlength="2048" placeholder="https://example.com/top-ten">
           </label>
-          <label class="toggle-row latest-year-row">
-            <span class="toggle-text"><strong>Prefer the latest year</strong><span class="hint">Use the current year when reliable data is available; otherwise use the latest complete year.</span></span>
-            <input id="prefer-latest-year" class="switch" type="checkbox" role="switch">
-          </label>
           <div class="topic-tools">
+            <div class="suggestion-style">
+              <div class="setting-text">
+                <span class="setting-name" id="diff-label">Suggested topic category</span>
+                <span class="hint">Choose easy or hard suggestions. The selected style is used for that suggestion.</span>
+              </div>
+              <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
+                <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
+                <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
+              </div>
+            </div>
             <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>
             <div id="topic-chips" class="chips"></div>
           </div>

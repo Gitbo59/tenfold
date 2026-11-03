@@ -213,7 +213,8 @@ input:disabled { opacity: 0.6; }
 .range-wrap input { width: 100%; accent-color: var(--bulb); }
 .range-val { font-weight: 700; font-size: 0.95rem; }
 
-.topic-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.topic-tools { display: grid; gap: 8px; margin-top: 12px; }
+.suggestion-style { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   appearance: none; cursor: pointer; border: 1px solid var(--line); background: var(--stage-deep); color: var(--chalk);
@@ -466,8 +467,8 @@ input:disabled { opacity: 0.6; }
 .fr-name .plink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .challenge-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.challenge-options[hidden] { display: none; }
 .invite-mode { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--bulb); font-size: 0.72rem; font-weight: 800; text-transform: uppercase; }
-.latest-year-row { margin: 12px 0; border-top: 1px solid var(--line); }
 .pl-page { display: grid; gap: 20px; }
 .pl-nav { display: flex; align-items: center; }
 .pl-back { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 9px 16px; border-color: rgba(255, 215, 91, 0.45); background: linear-gradient(110deg, rgba(255, 215, 91, 0.15), rgba(10, 18, 72, 0.72)); color: var(--chalk); text-decoration: none; box-shadow: 0 5px 16px rgba(0, 0, 0, 0.18); }

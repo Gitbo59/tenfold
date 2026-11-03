@@ -13,7 +13,7 @@ interface Config {
   lives: number;
   timerEnabled: boolean;
   turnSeconds: number;
-  difficulty: Difficulty;
+  preferLatestYear: boolean;
   hints: number;
 }
 
@@ -85,7 +85,7 @@ function defaultState(): Saved {
   return {
     initialized: false,
     phase: "lobby",
-    config: { lives: 3, timerEnabled: true, turnSeconds: 20, difficulty: "easy", hints: 3 },
+    config: { lives: 3, timerEnabled: true, turnSeconds: 20, preferLatestYear: false, hints: 3 },
     topic: "",
     basis: "",
     source: "",
@@ -154,6 +154,7 @@ export class Room extends DurableObject<Env> {
       if (saved) {
         const def = defaultState();
         this.s = { ...def, ...saved, config: { ...def.config, ...saved.config } };
+        Reflect.deleteProperty(this.s.config, "difficulty");
         // A generation can't survive an eviction, so drop back to the lobby.
         if (this.s.phase === "generating") this.s.phase = "lobby";
       }
@@ -181,7 +182,7 @@ export class Room extends DurableObject<Env> {
       const body: any = await request.json().catch(() => null);
       const pl = body?.players;
       if (!body?.matchId || !Array.isArray(pl) || pl.length !== 2 || !Array.isArray(body?.list?.answers) || body.list.answers.length !== 10) return new Response("bad setup", { status: 400 });
-      this.s.config = { lives: 3, timerEnabled: true, turnSeconds: 20, difficulty: "easy", hints: 0 };
+      this.s.config = { lives: 3, timerEnabled: true, turnSeconds: 20, preferLatestYear: false, hints: 0 };
       this.s.players = pl.map((p: any) => ({ id: String(p.id), name: String(p.name).slice(0, 16), lives: 3, score: 0, streak: 0, eliminated: false }));
       this.s.hostId = this.s.players[0].id;
       this.s.topic = String(body.list.title ?? "");
@@ -499,7 +500,7 @@ export class Room extends DurableObject<Env> {
       lives: clampInt(msg.lives, 1, 10, c.lives),
       timerEnabled: typeof msg.timerEnabled === "boolean" ? msg.timerEnabled : c.timerEnabled,
       turnSeconds: clampInt(msg.turnSeconds, 5, 120, c.turnSeconds),
-      difficulty: msg.difficulty === "easy" || msg.difficulty === "hard" ? msg.difficulty : c.difficulty,
+      preferLatestYear: typeof msg.preferLatestYear === "boolean" ? msg.preferLatestYear : c.preferLatestYear,
       hints: clampInt(msg.hints, 0, 5, c.hints),
     };
     for (const p of this.s.players) p.lives = this.s.config.lives;
@@ -591,7 +592,6 @@ export class Room extends DurableObject<Env> {
     this.persist();
     this.broadcast();
 
-    const difficulty = this.s.config.difficulty;
     try {
       let list: TopTen;
       let key: string;
@@ -606,7 +606,8 @@ export class Room extends DurableObject<Env> {
         key = `classic:${classic.id}`;
         listDifficulty = null;
       } else {
-        const preferLatestYear = msg.preferLatestYear === true;
+        const difficulty: Difficulty = msg.difficulty === "hard" ? "hard" : "easy";
+        const preferLatestYear = this.s.config.preferLatestYear;
         key = cacheKey(topic, difficulty, preferLatestYear);
         listDifficulty = difficulty;
         list = await this.getList(ws, topic, difficulty, key, preferLatestYear);
