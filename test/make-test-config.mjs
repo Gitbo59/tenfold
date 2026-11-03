@@ -2,6 +2,7 @@
 // remote-only AI binding removed, no cron, small caps and fake AI / OAuth providers on localhost.
 import fs from "node:fs";
 const dev = process.argv.includes("--dev"); // a config for previewing by hand: real timings, fake AI and sign-in
+const preview = process.argv.includes("--preview");
 let s = fs.readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
 s = s.replace(/\n\s*\/\/ Workers AI:[^\n]*\n\s*"ai": \{ "binding": "AI" \},\n/, "\n");
 s = s.replace(/\n\s*\/\/ Builds the next few daily lists[^\n]*\n\s*"triggers": \{ "crons": \[[^\]]*\] \},\n/, "\n");
@@ -15,6 +16,7 @@ if (dev) {
   set("RANKED_JOIN_SECONDS", 4); set("RANKED_FORFEIT_SECONDS", 3); set("RANKED_WIDEN_PER_SEC", 400); set("RANKED_LADDER_MIN_GAMES", 1);
 }
 s = s.replace('"vars": {', '"vars": {\n    "AI_BASE_URL": "http://127.0.0.1:9999", "AI_API_KEY": "test-key", "ADMIN_TOKEN": "admintok", "REPORT_EVICT_AFTER": 1,\n    "AUTH_SECRET": "test-auth-secret-0123456789", "OAUTH_MOCK_BASE": "http://127.0.0.1:9998",');
-if (/"ai":/.test(s) || /triggers/.test(s)) throw new Error("test config still has ai binding or cron");
+if (/^\s{2}"ai":\s*\{ "binding": "AI" \},/m.test(s) || /^\s{2}"triggers":/m.test(s)) throw new Error("test config still has ai binding or cron");
 if (dev) s = s.replace('"vars": {', '"vars": {\n    "NAME_CHANGE_DAYS": 0,'); // rename as often as you like while experimenting
+if (preview) s = s.replace('"vars": {', '"vars": {\n    "PREVIEW_MODE": "true",');
 fs.writeFileSync(new URL(dev ? "../wrangler.dev.jsonc" : "../wrangler.test.jsonc", import.meta.url), s);

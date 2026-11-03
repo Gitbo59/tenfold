@@ -39,7 +39,7 @@ npm run deploy
 
 That's it: the AI is a binding, so there are no secrets to set. You get a `*.workers.dev` URL; add a custom domain under Workers & Pages > your Worker > Settings > Domains & Routes. To deploy from Git instead, connect the repo under Workers & Pages > Create > Import a repository and keep the defaults.
 
-Wrangler Preview deployments use the separate `previews` settings in `wrangler.jsonc`; their Durable Objects are isolated and their AI-generation caps are lower than production. Preview deployments do not inherit production secrets. To enable sign-in in a Preview, set `AUTH_SECRET` in the Worker's **Previews Base** secrets, and configure any OAuth client IDs and secrets there as well.
+Wrangler Preview deployments use the separate `previews` settings in `wrangler.jsonc`; their Durable Objects are isolated and their AI-generation caps are lower than production. In Preview only, the app automatically signs you in as **Preview Player** so you can test the Ranked hub, profile, and queue without OAuth credentials. This is a shared dummy account for that Preview environment; don't use real personal data there. Preview deployments do not inherit production secrets, and OAuth providers are not enabled unless you configure their secrets in the Worker's **Previews Base**.
 
 > Why not Pages? Pages Functions can't host Durable Objects, which are what make live rooms simple. A Worker with static assets does everything Pages does.
 

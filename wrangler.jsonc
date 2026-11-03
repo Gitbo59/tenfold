@@ -73,6 +73,7 @@
       ]
     },
     "vars": {
+      "PREVIEW_MODE": "true",
       "AI_PROVIDER": "workers-ai",
       "AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       "DAILY_GENERATION_CAP": 5,

@@ -83,6 +83,11 @@ async function readJson(request: Request): Promise<any> {
 /** Arena methods return {ok:false,status,error} on failure; turn that into an HTTP response. */
 const reply = (r: any): Response => (r && r.ok === false ? json({ error: r.error }, r.status) : json(r));
 
+async function previewAccountId(): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tenfold:preview:dummy-account"));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function competitive(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   const token = parseCookies(request)[SESSION_COOKIE] ?? null;
@@ -123,7 +128,24 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
   }
 
   // ---- account
-  if (path === "/api/me" && request.method === "GET") return json(await arena.me(token));
+  if (path === "/api/me" && request.method === "GET") {
+    const me = await arena.me(token);
+    if (env.PREVIEW_MODE !== "true" || me.signedIn) return json(me);
+
+    const signedIn = await arena.signIn(await previewAccountId(), "preview");
+    if (!signedIn.ok) return reply(signedIn);
+    if (!signedIn.name) {
+      const named = await arena.setName(signedIn.token, "Preview Player");
+      if (!named.ok) {
+        await arena.signOut(signedIn.token);
+        return reply(named);
+      }
+    }
+
+    const response = json(await arena.me(signedIn.token));
+    response.headers.append("Set-Cookie", cookie(url, SESSION_COOKIE, signedIn.token, 30 * 24 * 60 * 60));
+    return response;
+  }
   if (path === "/api/me/name" && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
     const body = await readJson(request);
