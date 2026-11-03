@@ -5,6 +5,7 @@
   const { $, $$, esc, toast } = T;
 
   let pollTimer = null;
+  let pollDelay = 1500;
   let waitingSince = 0;
   let enteringMatch = false;
   let dailyTab = "today";
@@ -68,10 +69,9 @@
   }
 
   async function loadHub() {
-    const [me, hist, ladder, daily, friends] = await Promise.all([
+    const [me, hist, daily, friends] = await Promise.all([
       api("/api/ranked/me"),
       api("/api/ranked/history"),
-      api("/api/ranked/ladder"),
       api("/api/daily/state"),
       api("/api/friends"),
     ]);
@@ -83,6 +83,7 @@
     renderDaily(daily);
     renderFriends(friends);
     loadDailyBoard();
+    const ladder = me.ladder || {};
     $("#rk-ladder-body").innerHTML = ladder.rows ? ladderHtml(ladder.rows.slice(0, 20), ladder.me) : '<p class="hint">Couldn\'t load the ladder just now.</p>';
     if (me.status === "matched") return goToMatch(me);
     if (me.status === "waiting") return showWaiting(me);
@@ -236,7 +237,10 @@
     $("#rk-wait").hidden = false;
     waitingSince = Date.now() - (s.waitedMs || 0);
     updateWaitText(s);
-    if (!pollTimer) pollTimer = setInterval(poll, 1500);
+    if (!pollTimer) {
+      pollDelay = 1500;
+      schedulePoll();
+    }
   }
 
   function updateWaitText(s) {
@@ -246,8 +250,16 @@
   }
 
   function stopPolling() {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
+  }
+
+  function schedulePoll() {
+    if (pollTimer || $("#screen-ranked").hidden) return;
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      void poll();
+    }, pollDelay);
   }
 
   async function poll() {
@@ -255,11 +267,14 @@
     const s = await api("/api/ranked/status");
     if (s.httpStatus === 401) return refresh();
     if (s.status === "matched") return goToMatch(s);
-    if (s.status === "waiting") return updateWaitText(s);
+    if (s.status === "waiting") updateWaitText(s);
     if (s.status === "idle") {
       showIdle();
       toast("You were taken out of the queue. Join again to keep looking.");
+      return;
     }
+    pollDelay = Math.min(pollDelay + 1000, 5000);
+    schedulePoll();
   }
 
   function goToMatch(s) {

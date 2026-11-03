@@ -79,6 +79,7 @@ export class Arena extends DurableObject<Env> {
   private pairing = false;
   private generating = new Map<string, Promise<TopTen>>();
   private rate = new Map<string, { t: number; n: number }>();
+  private lastActiveSweep = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -107,6 +108,7 @@ export class Arena extends DurableObject<Env> {
     try { sql.exec("ALTER TABLE matches ADD COLUMN title TEXT"); } catch { /* already there */ }
     sql.exec("CREATE INDEX IF NOT EXISTS matches_status ON matches (status, ts)");
     sql.exec("CREATE INDEX IF NOT EXISTS attempts_date ON attempts (date, state)");
+    sql.exec("CREATE INDEX IF NOT EXISTS attempts_state_date ON attempts (state, date)");
     sql.exec("CREATE INDEX IF NOT EXISTS guesses_attempt ON guesses (attempt_id)");
   }
 
@@ -553,8 +555,8 @@ export class Arena extends DurableObject<Env> {
     let rows: any[];
     if (month) {
       rows = this.q(
-        `SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, SUM(a.score) AS score, COUNT(*) AS days, SUM(a.total_ms) AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id JOIN daily_lists d ON d.date = a.date AND d.status = 'ok' WHERE substr(a.date, 1, 7) = ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 GROUP BY acc.id ORDER BY score DESC, ms ASC LIMIT 300`,
-        month, viewer ?? "",
+        `SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, SUM(a.score) AS score, COUNT(*) AS days, SUM(a.total_ms) AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id JOIN daily_lists d ON d.date = a.date AND d.status = 'ok' WHERE a.date >= ? AND a.date < ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 GROUP BY acc.id ORDER BY score DESC, ms ASC LIMIT 300`,
+        `${month}-01`, new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)).toISOString().slice(0, 10), viewer ?? "",
       );
     } else {
       rows = this.q(
@@ -617,7 +619,10 @@ export class Arena extends DurableObject<Env> {
   }
 
   private expireActive(): void {
-    this.q("UPDATE matches SET status = 'aborted', reason = 'expired' WHERE status = 'active' AND ts < ?", Date.now() - 3 * 60 * 60 * 1000);
+    const now = Date.now();
+    if (now - this.lastActiveSweep < 60_000) return;
+    this.q("UPDATE matches SET status = 'aborted', reason = 'expired' WHERE status = 'active' AND ts < ?", now - 3 * 60 * 60 * 1000);
+    this.lastActiveSweep = now;
   }
 
   private activeMatch(id: string) {
@@ -672,9 +677,30 @@ export class Arena extends DurableObject<Env> {
     return { ok: true, ...this.statusFor(acc.id) };
   }
 
-  private playedRecently(a: string, b: string): boolean {
-    const n = Number(this.q("SELECT COUNT(*) AS n FROM matches WHERE status = 'done' AND ts > ? AND ((a = ? AND b = ?) OR (a = ? AND b = ?))", Date.now() - 24 * 3600_000, a, b, b, a)[0].n);
-    return n >= 2; // stops two accounts trading wins to pump a rating
+  private recentPairs(ids: string[]): Set<string> {
+    const waiting = new Set(ids);
+    const matches = new Set<string>();
+    const counts = new Map<string, number>();
+    const cutoff = Date.now() - 24 * 3600_000;
+    for (let offset = 0; offset < ids.length; offset += 400) {
+      const batch = ids.slice(offset, offset + 400);
+      const marks = batch.map(() => "?").join(", ");
+      const rows = this.q(
+        `SELECT id, a, b FROM matches WHERE status = 'done' AND ts > ? AND (a IN (${marks}) OR b IN (${marks}))`,
+        cutoff, ...batch, ...batch,
+      );
+      for (const row of rows) {
+        const id = String(row.id);
+        if (matches.has(id)) continue;
+        matches.add(id);
+        const a = String(row.a), b = String(row.b);
+        if (waiting.has(a) && waiting.has(b)) {
+          const pair = a < b ? `${a}:${b}` : `${b}:${a}`;
+          counts.set(pair, (counts.get(pair) ?? 0) + 1);
+        }
+      }
+    }
+    return new Set([...counts].filter(([, count]) => count >= 2).map(([pair]) => pair)); // Keep the two-games-per-day limit.
   }
 
   private async tryPair(): Promise<void> {
@@ -684,6 +710,7 @@ export class Arena extends DurableObject<Env> {
       const now = Date.now();
       for (const e of [...this.queue.values()]) if (now - e.lastPoll > 15_000 || now - e.since > 5 * 60_000) this.queue.delete(e.id);
       const waiting = [...this.queue.values()].sort((x, y) => x.since - y.since);
+      const recentPairs = this.recentPairs(waiting.map((e) => e.id));
       const used = new Set<string>();
       for (const a of waiting) {
         if (used.has(a.id)) continue;
@@ -692,7 +719,8 @@ export class Arena extends DurableObject<Env> {
           if (b.id === a.id || used.has(b.id)) continue;
           const gap = Math.abs(a.rating - b.rating);
           if (gap > Math.max(this.window(a, now), this.window(b, now))) continue;
-          if (this.playedRecently(a.id, b.id)) continue;
+          const pair = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+          if (recentPairs.has(pair)) continue;
           if (!best || gap < Math.abs(a.rating - best.rating)) best = b;
         }
         if (!best) continue;
@@ -811,10 +839,15 @@ export class Arena extends DurableObject<Env> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
     const r = this.ratingRow(acc.id);
-    const mine = this.ladderRows(this.ladderMin(), acc.id).find((x) => x.me);
+    const minGames = this.ladderMin();
+    const ladder = this.ladderRows(minGames, acc.id);
+    const mine = ladder.find((x) => x.me);
+    const ladderRows = ladder.map(({ id: _id, ...row }) => row);
     return {
       ok: true, name: acc.name, avatar: this.avatarOf(acc.id, acc.avatar), rating: r.rating, games: r.games, wins: r.wins, losses: r.losses, draws: r.draws, peak: r.peak,
-      provisional: r.games < PROVISIONAL_GAMES, rank: mine ? mine.rank : null, ...this.statusFor(acc.id),
+      provisional: r.games < PROVISIONAL_GAMES, rank: mine ? mine.rank : null,
+      ladder: { rows: ladderRows.slice(0, 50), me: ladderRows.find((row) => row.me && row.rank > 50) ?? null, minGames },
+      ...this.statusFor(acc.id),
     };
   }
 
@@ -957,7 +990,7 @@ export class Arena extends DurableObject<Env> {
 
   private friendRow(id: string) {
     return this.q(
-      "SELECT f.status, f.requested_by, a.id AS other, a.name AS name, a.avatar AS avatar FROM friendships f JOIN accounts a ON a.id = CASE WHEN f.lo = ? THEN f.hi ELSE f.lo END WHERE (f.lo = ? OR f.hi = ?) AND a.banned = 0 AND a.name IS NOT NULL ORDER BY a.name ASC",
+      "SELECT f.status, f.requested_by, a.id AS other, a.name AS name, a.avatar AS avatar, r.rating AS rating FROM friendships f JOIN accounts a ON a.id = CASE WHEN f.lo = ? THEN f.hi ELSE f.lo END LEFT JOIN ratings r ON r.account_id = a.id WHERE (f.lo = ? OR f.hi = ?) AND a.banned = 0 AND a.name IS NOT NULL ORDER BY a.name ASC",
       id, id, id,
     );
   }
@@ -966,13 +999,31 @@ export class Arena extends DurableObject<Env> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
     const friends: any[] = [], incoming: any[] = [], outgoing: any[] = [];
-    for (const r of this.friendRow(acc.id)) {
+    const rows = this.friendRow(acc.id);
+    const friendIds = rows.filter((r) => String(r.status) === "accepted").map((r) => String(r.other));
+    const friendSet = new Set(friendIds);
+    const matched = new Set<string>();
+    if (friendIds.length) {
+      this.expireActive();
+      for (let offset = 0; offset < friendIds.length; offset += 400) {
+        const batch = friendIds.slice(offset, offset + 400);
+        const marks = batch.map(() => "?").join(", ");
+        const active = this.q(
+          `SELECT a, b FROM matches WHERE status = 'active' AND (a IN (${marks}) OR b IN (${marks}))`,
+          ...batch, ...batch,
+        );
+        for (const row of active) {
+          if (friendSet.has(String(row.a))) matched.add(String(row.a));
+          if (friendSet.has(String(row.b))) matched.add(String(row.b));
+        }
+      }
+    }
+    for (const r of rows) {
       const other = String(r.other);
-      const entry = { name: String(r.name), avatar: this.avatarOf(other, r.avatar), rating: this.peekRating(other).rating };
+      const entry = { name: String(r.name), avatar: this.avatarOf(other, r.avatar), rating: Number(r.rating) || START_RATING };
       const status = String(r.status);
       if (status === "accepted") {
-        const act = this.statusFor(other);
-        friends.push({ ...entry, activity: act.status === "matched" ? "In a ranked match" : act.status === "waiting" ? "Looking for a match" : null });
+        friends.push({ ...entry, activity: matched.has(other) ? "In a ranked match" : this.queue.has(other) ? "Looking for a match" : null });
       } else if (status === "pending") (String(r.requested_by) === acc.id ? outgoing : incoming).push(entry);
     }
     return { ok: true, friends, incoming, outgoing };

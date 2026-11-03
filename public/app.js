@@ -47,6 +47,7 @@
   let ws = null;
   let code = null;
   let state = null;
+  let gameTicker = null;
   let skew = 0;
   let retries = 0;
   let leaving = false;
@@ -88,6 +89,8 @@
       if (a.dataset.mode === (name === "home" ? "fun" : "ranked")) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     }
+    window.dispatchEvent(new CustomEvent("tf:screen", { detail: name }));
+    updateGameTicker();
     if (name === "home") window.dispatchEvent(new Event("tf:home"));
   }
 
@@ -243,6 +246,7 @@
   }
 
   document.addEventListener("visibilitychange", () => {
+    updateGameTicker();
     if (document.visibilityState === "visible" && code && !leaving && (!ws || ws.readyState > 1)) {
       clearTimeout(reconnectTimer);
       connect();
@@ -253,6 +257,7 @@
     state = m;
     skew = m.serverNow - Date.now();
     render();
+    updateGameTicker();
   }
 
   // ------------------------------------------------------------------ rendering
@@ -571,7 +576,16 @@
       bar.classList.add("no-clock");
     }
   }
-  setInterval(tick, 100);
+  function updateGameTicker() {
+    const active = !document.hidden && code && state?.phase === "playing" && state.deadline && !$("#screen-game").hidden;
+    if (active && !gameTicker) {
+      tick();
+      gameTicker = setInterval(tick, 100);
+    } else if (!active && gameTicker) {
+      clearInterval(gameTicker);
+      gameTicker = null;
+    }
+  }
 
   // ------------------------------------------------------------------ reports
   function openReport(ctx) {

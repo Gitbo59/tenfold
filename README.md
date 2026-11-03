@@ -187,7 +187,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d '{"list":{"title":"...","basis":"...","source":"...","answers":[{"answer":"...","aliases":[]}, ...10 in total]}}' https://YOUR-SITE/api/admin/pool
 ```
 
-Free-tier note: while someone waits in the queue their page asks the server for an update every 1.5 seconds, about 40 requests a minute. Worker requests are free up to 100,000 a day, so that's roughly 2,500 waiting-minutes a day across everyone. Deleting an account removes its rating and match history. The privacy section of `/rules` covers this.
+Free-tier note: while someone waits in the queue their page asks the server for an update every 1.5 seconds at first, then backs off to every 5 seconds (about 12 requests a minute for a long wait). Worker requests are free up to 100,000 a day, so the sustained rate is roughly 8,300 waiting-minutes a day across everyone. Deleting an account removes its rating and match history. The privacy section of `/rules` covers this.
 
 ## Profiles, friends and linked accounts
 
