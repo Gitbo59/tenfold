@@ -400,6 +400,10 @@ input:disabled { opacity: 0.6; }
 .profile-avatar svg { width: 84px; height: 84px; display: block; }
 .profile-id { flex: 1; min-width: 140px; }
 .profile-name { font-size: clamp(1.8rem, 5vw, 2.6rem); overflow-wrap: anywhere; }
+.profile-edit-icon { display: inline-flex; width: 30px; height: 30px; margin-left: 9px; vertical-align: middle; align-items: center; justify-content: center; border: 1px solid rgba(255, 215, 91, 0.4); border-radius: 7px; color: var(--bulb); background: rgba(255, 215, 91, 0.1); }
+.profile-edit-icon:hover { background: rgba(255, 215, 91, 0.2); }
+.profile-edit-icon:focus-visible { outline: 3px solid var(--bulb); outline-offset: 3px; }
+.profile-edit-icon svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .profile-rating { display: grid; justify-items: end; }
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin: 18px 0 14px; }
 .stat { background: var(--stage-deep); border-radius: 6px; padding: 10px 12px; display: grid; gap: 2px; }

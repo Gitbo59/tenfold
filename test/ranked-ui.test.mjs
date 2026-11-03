@@ -68,8 +68,8 @@ ok(await ui.until(() => /Nobody has a rating yet/.test(ui.$("#rk-ladder-body").t
 ok(ui.$("#mode-pill a[aria-current=page]").dataset.mode === "ranked", "the pill shows Ranked");
 
 console.log("the hub links to the profile screen; account buttons moved there");
-ok(ui.$("#rk-name").getAttribute("href") === "#/me" && ui.$("#rk-edit-profile").getAttribute("href") === "#/me" && ui.$(".profile-link[aria-label]").getAttribute("href") === "#/me", "your picture, name and an 'edit profile' button all open your profile");
-ok(ui.$("#rk-edit-profile").classList.contains("pl-back") && !!ui.$("#rk-edit-profile .pl-back-icon"), "the View your profile button uses the Ranked hub button style");
+ok(ui.$("#rk-name").getAttribute("href") === "#/me" && ui.$("#rk-edit-profile").getAttribute("href") === "#/me" && ui.$(".profile-link[aria-label]").getAttribute("href") === "#/me", "your picture, name and the pencil icon all open your profile");
+ok(ui.$("#rk-edit-profile").getAttribute("aria-label") === "Edit your profile" && !!ui.$("#rk-edit-profile svg"), "the small pencil icon is accessible and appears beside your name");
 ok(!ui.$("#rk-signout") && !ui.$("#rk-delete") && !ui.$("#rk-edit-avatar") && !ui.$("#ranked-account"), "sign out, delete and the picture editor are no longer on the hub");
 ok(!!ui.$("#fr-add-form") && /No friends yet/.test(ui.$("#fr-list").textContent), "the hub has a Friends card (empty to start with)");
 
