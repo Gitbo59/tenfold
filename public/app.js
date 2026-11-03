@@ -56,6 +56,7 @@
   let joinSent = false;
   let lastTurnPid = null;
   let lastLogId = null;
+  let audioContext = null;
   let configTimer = null;
   let selectedClassic = null;
   let chipsFor = null;
@@ -65,6 +66,36 @@
   let reportCtx = null;
   const animated = new Set();
   const myReports = new Set();
+
+  function prepareCorrectSound() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    audioContext ||= new AudioContext();
+    if (audioContext.state === "suspended") {
+      void audioContext.resume().catch((error) => console.warn("Correct-answer sound is unavailable.", error));
+    }
+    return audioContext;
+  }
+
+  function playCorrectSound() {
+    const context = prepareCorrectSound();
+    if (!context) return;
+    const start = context.currentTime;
+    [880, 1174].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const volume = context.createGain();
+      const at = start + index * 0.075;
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      volume.gain.setValueAtTime(0.0001, at);
+      volume.gain.exponentialRampToValueAtTime(0.18, at + 0.012);
+      volume.gain.exponentialRampToValueAtTime(0.0001, at + 0.24);
+      oscillator.connect(volume);
+      volume.connect(context.destination);
+      oscillator.start(at);
+      oscillator.stop(at + 0.25);
+    });
+  }
 
   // Local edits shown immediately; the server's echo confirms them (or they expire).
   const pending = {};
@@ -323,7 +354,7 @@
     $("#lobby-players").innerHTML = s.players
       .map(
         (p) =>
-          `<li>${avatar(p)}<span class="pname">${esc(p.name)}${p.id === pid ? " (you)" : ""}${p.id === s.hostId ? '<span class="tag">Host</span>' : ""}${p.connected ? "" : '<span class="tag tag-away">Away</span>'}</span></li>`,
+          `<li>${avatar(p)}<span class="pname">${esc(p.name)}${p.id === pid ? " (you)" : ""}${p.id === s.hostId ? '<span class="tag">Leader</span>' : ""}${p.connected ? "" : '<span class="tag tag-away">Away</span>'}</span>${isHost && !s.ranked && p.id !== pid && p.connected ? `<button type="button" class="btn btn-small" data-promote="${esc(p.id)}">Make leader</button>` : ""}</li>`,
       )
       .join("");
 
@@ -490,7 +521,9 @@
     // Feed + shake on new misses
     const log = s.log;
     const newest = log.length ? log[log.length - 1].id : 0;
-    if (lastLogId !== null && log.some((l) => l.id > lastLogId && (l.kind === "wrong" || l.kind === "timeout"))) {
+    const newEntries = lastLogId === null ? [] : log.filter((l) => l.id > lastLogId);
+    if (newEntries.some((l) => l.kind === "correct")) playCorrectSound();
+    if (newEntries.some((l) => l.kind === "wrong" || l.kind === "timeout")) {
       const w = $("#board-wrap");
       w.classList.remove("shake");
       void w.offsetWidth;
@@ -729,6 +762,10 @@
   });
 
   $("#btn-hint").addEventListener("click", () => send({ t: "hint" }));
+  $("#lobby-players").addEventListener("click", (e) => {
+    const button = e.target.closest("[data-promote]");
+    if (button) send({ t: "promote", targetId: button.dataset.promote });
+  });
   $("#btn-source").addEventListener("click", () => {
     showSource = !showSource;
     if (showSource && state && state.phase === "playing") send({ t: "source" });
@@ -774,6 +811,7 @@
     const input = $("#guess");
     const text = input.value.trim();
     if (!text || input.disabled) return;
+    prepareCorrectSound();
     send({ t: "guess", text, ...(state && state.ranked ? { sig: collectSignals() } : {}) });
     input.value = "";
   });
@@ -831,7 +869,7 @@
     show("player");
     window.dispatchEvent(new Event("tf:player"));
   }
-  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
+  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), prepareCorrectSound, playCorrectSound, avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
   function route() {
     if (location.hash.startsWith("#/daily")) openDaily();
     else if (location.hash.startsWith("#/ranked")) openRanked();

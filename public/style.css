@@ -465,6 +465,7 @@ input:disabled { opacity: 0.6; }
 .fr-name { display: grid; gap: 1px; min-width: 0; }
 .fr-name .plink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.challenge-options { display: flex; flex-wrap: wrap; gap: 6px; }
 .invite-mode { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--bulb); font-size: 0.72rem; font-weight: 800; text-transform: uppercase; }
 .latest-year-row { margin: 12px 0; border-top: 1px solid var(--line); }
 .pl-page { display: grid; gap: 20px; }

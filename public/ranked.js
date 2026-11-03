@@ -10,6 +10,7 @@
   let enteringMatch = false;
   let dailyTab = "today";
   let friendsRefreshTimer = null;
+  let challengeFor = null;
 
   async function api(path, body) {
     const opts = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -172,11 +173,11 @@
       `<li class="fr-row"><span>${T.avatar(p.avatar, 32)}</span><span class="fr-name">${plink(p.name)}<span class="hint">${p.rating}${hint ? `, ${esc(hint)}` : ""}</span></span><span class="fr-actions">${actions}</span></li>`;
     const btn = (act, name, label, primary) => `<button class="btn btn-small${primary ? " btn-primary" : ""}" type="button" data-fr="${act}" data-name="${esc(name)}">${label}</button>`;
     const playButtons = (name) =>
-      `<button class="btn btn-small" type="button" data-play-mode="rated" data-name="${esc(name)}" aria-label="Invite ${esc(name)} to a rated game">Rated</button><button class="btn btn-small" type="button" data-play-mode="casual" data-name="${esc(name)}" aria-label="Invite ${esc(name)} to a casual game">Casual</button>`;
+      `<button class="btn btn-small btn-primary" type="button" data-challenge="${esc(name)}" aria-expanded="${challengeFor === name}" aria-controls="challenge-options">Challenge</button>${challengeFor === name ? `<span class="challenge-options" id="challenge-options"><button class="btn btn-small" type="button" data-play-mode="rated" data-name="${esc(name)}">Ranked</button><button class="btn btn-small" type="button" data-play-mode="casual" data-name="${esc(name)}">For fun</button></span>` : ""}`;
     const gameInvite = (invite) => {
-      const mode = invite.mode === "rated" ? "Rated" : "Casual";
+      const mode = invite.mode === "rated" ? "Ranked" : "For fun";
       const actions = invite.status === "accepted"
-        ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="join" data-code="${esc(invite.code)}" data-name="${esc(invite.name)}">Join ${mode.toLowerCase()} game</button>`
+        ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="join" data-code="${esc(invite.code)}" data-name="${esc(invite.name)}">Join ${mode} game</button>`
         : invite.direction === "incoming"
           ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="accept" data-id="${esc(invite.id)}">Accept</button>${btn("invite-decline", invite.id, "Decline", false)}`
           : btn("invite-cancel", invite.id, "Cancel", false);
@@ -204,12 +205,21 @@
     friendsRefreshTimer = setTimeout(async () => {
       if ($("#screen-ranked").hidden) return;
       await reloadFriends();
+      await joinAcceptedFriendGame();
       scheduleFriendsRefresh();
     }, 7000);
   }
 
+  async function joinAcceptedFriendGame() {
+    if (enteringMatch || $("#screen-ranked").hidden) return;
+    const f = await api("/api/friends");
+    const invite = f.outgoingInvites?.find((item) => item.mode === "casual" && item.status === "accepted");
+    if (invite) joinFriendGame(invite.code, invite.name);
+  }
+
   function joinFriendGame(code, name) {
     if (!/^[A-Z0-9]{5}$/.test(code || "")) return toast("That game room is no longer available.", "error");
+    enteringMatch = true;
     const ownName = $("#rk-name").textContent.trim();
     if (ownName) localStorage.setItem("tf_name", ownName);
     toast(`Joining ${name}'s game.`);
@@ -231,6 +241,7 @@
     const b = e.target.closest("[data-fr]");
     const gameButton = e.target.closest("[data-invite-action]");
     const playButton = e.target.closest("[data-play-mode]");
+    const challengeButton = e.target.closest("[data-challenge]");
     if (gameButton?.dataset.inviteAction === "join") return joinFriendGame(gameButton.dataset.code, gameButton.dataset.name);
     if (gameButton) {
       gameButton.disabled = true;
@@ -241,12 +252,19 @@
       reloadFriends();
       return;
     }
+    if (challengeButton) {
+      challengeFor = challengeFor === challengeButton.dataset.challenge ? null : challengeButton.dataset.challenge;
+      await reloadFriends();
+      return;
+    }
     if (playButton) {
       playButton.disabled = true;
+      challengeFor = null;
       const r = await api("/api/ranked/invites", { name: playButton.dataset.name, mode: playButton.dataset.playMode });
       if (r.error) toast(r.error, "error");
-      else toast(`${playButton.dataset.playMode === "rated" ? "Rated" : "Casual"} game invitation sent.`);
+      else toast(`${playButton.dataset.playMode === "rated" ? "Ranked" : "For fun"} game invitation sent.`);
       await reloadFriends();
+      await joinAcceptedFriendGame();
       return;
     }
     if (!b) return;

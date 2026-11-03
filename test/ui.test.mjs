@@ -9,6 +9,14 @@ vc.on("jsdomError", (e) => errors.push(e.message)); vc.on("error", (e) => errors
 const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8").replace(/<link[^>]*fonts[^>]*>/g, "").replace(/<script src="\/app.js" defer><\/script>/, "");
 const dom = new JSDOM(html, { url: BASE + "/", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
 const w = dom.window; w.fetch = (u, o) => fetch(new URL(u, BASE), o);
+let audioStarts = 0;
+w.AudioContext = class {
+  currentTime = 0;
+  state = "running";
+  destination = {};
+  createOscillator() { return { frequency: { value: 0 }, connect() {}, start() { audioStarts++; }, stop() {} }; }
+  createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
+};
 w.eval(fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8"));
 const $ = (s) => w.document.querySelector(s); const $$ = (s) => [...w.document.querySelectorAll(s)];
 const visible = (id) => !$(id).hidden;
@@ -35,6 +43,11 @@ await new Promise((r) => (bobWs.onopen = r));
 const bsend = (o) => bobWs.send(JSON.stringify(o));
 bsend({ t: "join", pid: bobPid, name: "Bob" });
 ok(await until(() => $$("#lobby-players li").length === 2), "both players listed");
+ok(!!$("#lobby-players [data-promote]"), "the leader can promote a connected player");
+click($("#lobby-players [data-promote]"));
+ok(await until(() => bobState && bobState.hostId === bobPid) && !$("#lobby-players [data-promote]"), "promotion transfers lobby controls to the other player");
+bsend({ t: "promote", targetId: w.sessionStorage.getItem("tf_pid") });
+ok(await until(() => bobState && bobState.hostId !== bobPid && !!$("#lobby-players [data-promote]")), "the new leader can promote the original leader back");
 
 click($(".seg[data-diff=hard]"));
 ok(await until(() => bobState && bobState.config.difficulty === "hard") && $(".seg[data-diff=hard]").getAttribute("aria-checked") === "true", "Hard selected; the other player sees it");
@@ -77,6 +90,7 @@ async function ensureMyTurn() { for (let i = 0; i < 60 && !turnIsMine(); i++) { 
 ok(await ensureMyTurn(), "got my turn");
 submitGuess("everest");
 ok(await until(() => $$("#board .plate.found").length === 1) && $("#board .plate.found .ans").textContent === "Mount Everest", "alias 'everest' reveals Mount Everest");
+ok(await until(() => audioStarts === 2), "a newly correct answer plays the synthesized ding once");
 ok(!$(".plate-hint") || $$(".plate-hint").length === 0, "the clue disappears once that answer is found");
 const flag = $("#board .plate.found .flag"); ok(!!flag && flag.textContent === "Report", "found answers carry a Report link");
 click(flag);

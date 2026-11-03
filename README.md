@@ -45,10 +45,10 @@ Wrangler Preview deployments use the separate `previews` settings in `wrangler.j
 
 ## How the game works
 
-1. One player creates a room and shares the code or invite link (up to 8 players).
-2. The host sets **lives**, the **time limit** (on or off, 5 to 120 seconds a turn), the **list difficulty** (Easy or Hard) and how many **hints** the round allows (0 to 5).
-3. The host types a topic, taps a suggestion, picks a built-in list, or imports a ranked list from a public HTTPS webpage. The importer accepts ordered lists or tables with a rank column and ten distinct entries; it reports an error instead of silently switching to AI if the page cannot be imported. The optional **Prefer the latest year** setting asks AI for the current year when reliable data exists, otherwise the latest complete year. Answers stay on the server until they're found, so nobody can peek in dev tools.
-4. Players take turns. A right guess reveals the answer for everyone. A wrong guess, or running out of time, costs a life. At zero lives you're out.
+1. One player creates a room and shares the code or invite link (up to 8 players). The first player is the **leader**.
+2. The leader sets **lives**, the **time limit** (on or off, 5 to 120 seconds a turn), the **list difficulty** (Easy or Hard) and how many **hints** the round allows (0 to 5). While the room is in the lobby, the leader can promote another connected player to take over configuration.
+3. The leader types a topic, taps a suggestion, picks a built-in list, or imports a ranked list from a public HTTPS webpage. The importer accepts ordered lists or tables with a rank column and ten distinct entries; it reports an error instead of silently switching to AI if the page cannot be imported. The optional **Prefer the latest year** setting asks AI for the current year when reliable data exists, otherwise the latest complete year. Answers stay on the server until they're found, so nobody can peek in dev tools.
+4. Players take turns. A right guess reveals the answer for everyone and plays a short ding. A wrong guess, or running out of time, costs a life. At zero lives you're out.
 5. The round ends when the board is cleared or everyone is out. The last player standing keeps guessing until they run out of lives or finish the board.
 
 ### Easy and Hard
@@ -88,7 +88,7 @@ A pill at the top centre switches between them (it hides while you're inside a g
   - **Ranked match:** the queue button, and a short "how ranked works" panel.
   - **Recent ranked games:** each opponent (with their picture and rating), the result, how many points you gained or lost, your rating afterwards, the list that was played and how it ended.
   - **Daily challenge:** today's status (not started, in progress, or your score and place), a button to play, and the daily and monthly leaderboards.
-  - **Friends:** add a friend by username, accept or decline requests, see what your friends are up to (looking for a match, or in one), and invite them to either a rated Ranked match or an unranked casual game.
+  - **Friends:** add a friend by username, accept or decline requests, see what your friends are up to (looking for a match, or in one), and use **Challenge** to choose a rated Ranked match or a For fun game. Accepting a For fun challenge brings both players into a normal configurable room.
   - **Ranked ladder:** the top 20 by rating, with your own row added if you're further down.
 
 Clicking your picture or name on the hub opens **your profile** (`#/me`), and clicking anyone else's name anywhere (ladder, leaderboards, recent games, friends) opens **their profile** (`#/u/Username`).

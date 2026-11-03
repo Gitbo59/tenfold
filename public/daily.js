@@ -187,7 +187,7 @@
   }
 
   const result = {
-    hit: (r) => toast(`+${r.points} for ${r.answer}`),
+    hit: (r) => { T.playCorrectSound(); toast(`+${r.points} for ${r.answer}`); },
     miss: (r) => toast(r.livesLeft > 0 ? `Not on the list. ${r.livesLeft} ${r.livesLeft === 1 ? "life" : "lives"} left.` : "Not on the list. That was your last life.", "error"),
     dupe: (r) => toast(`${r.answer} is already on the board.`),
     repeat: () => toast("You already tried that one. No life lost."),
@@ -197,6 +197,7 @@
     e.preventDefault();
     const text = input.value.trim();
     if (!text || !state || state.status !== "playing") return;
+    T.prepareCorrectSound();
     const signals = collectSignals();
     input.value = "";
     $("#daily-guess-btn").disabled = true;

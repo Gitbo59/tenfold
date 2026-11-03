@@ -417,6 +417,8 @@ export class Room extends DurableObject<Env> {
         return this.forfeit(me.id, "resigned");
       case "config":
         return this.onConfig(me, msg);
+      case "promote":
+        return this.onPromote(me, msg);
       case "start":
         return this.onStart(ws, me, msg);
       case "guess":
@@ -501,6 +503,17 @@ export class Room extends DurableObject<Env> {
       hints: clampInt(msg.hints, 0, 5, c.hints),
     };
     for (const p of this.s.players) p.lives = this.s.config.lives;
+    this.persist();
+    this.broadcast();
+  }
+
+  private onPromote(me: Player, msg: any): void {
+    if (this.s.ranked || this.s.phase !== "lobby" || this.hostId() !== me.id) return;
+    if (typeof msg.targetId !== "string" || msg.targetId === me.id) return;
+    const target = this.s.players.find((p) => p.id === msg.targetId);
+    if (!target || !this.isConnected(target.id)) return;
+    this.s.hostId = target.id;
+    this.addLog("info", `${me.name} made ${target.name} the lobby leader.`);
     this.persist();
     this.broadcast();
   }

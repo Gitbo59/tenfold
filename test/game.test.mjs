@@ -42,6 +42,23 @@ ok(true, "config values are clamped (10 lives, 5s)");
 A.send({ t: "config", lives: 2, timerEnabled: true, turnSeconds: 6 });
 await A.until((s) => s.config.lives === 2 && s.config.turnSeconds === 6);
 
+console.log("lobby leadership");
+B.send({ t: "promote", targetId: B.pid });
+await sleep(150);
+ok(A.state.hostId === A.pid, "a non-leader cannot promote themselves");
+A.send({ t: "promote", targetId: B.pid });
+await A.until((s) => s.hostId === B.pid);
+B.send({ t: "config", lives: 4 });
+await B.until((s) => s.config.lives === 4);
+ok(A.state.config.lives === 4, "the promoted leader can configure the lobby");
+B.send({ t: "start", topic: "" });
+for (let i = 0; i < 100 && !B.toasts.some((t) => t.kind === "error"); i++) await sleep(25);
+ok(B.toasts.some((t) => t.kind === "error" && /Enter a topic/.test(t.msg)), "the promoted leader can start a game");
+B.send({ t: "promote", targetId: A.pid });
+await A.until((s) => s.hostId === A.pid);
+A.send({ t: "config", lives: 2, timerEnabled: true, turnSeconds: 6 });
+await A.until((s) => s.config.lives === 2 && s.config.turnSeconds === 6);
+
 console.log("start (rejected topic, then good topic)");
 B.send({ t: "start", topic: "bad topic" }); await sleep(150);
 ok(A.state.phase === "lobby", "non-host cannot start");
