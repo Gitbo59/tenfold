@@ -108,7 +108,7 @@ ui.click(ui.$("#btn-ranked-back"));
 ok(await ui.until(() => !ui.$("#screen-ranked").hidden && ui.$("#rk-rating").textContent === "1220" && !ui.$("#mode-pill").hidden), "back on the hub my rating is 1220 and the pill is back");
 const stats = Object.fromEntries(ui.$$("#rk-stats .stat").map((s) => [s.querySelector(".stat-l").textContent, s.querySelector(".stat-n").textContent]));
 ok(stats["Peak rating"] === "1220" && stats["Game"] === "1" && stats["Win rate"] === "100%" && stats["Won-lost-drawn"] === "1-0-0" && stats["Current streak"] === "1 W", "stats update: " + JSON.stringify(stats));
-ok(/#1 on the ladder/.test(ui.$("#rk-sub").textContent) && !!ui.$("#rk-trend polyline"), "my ladder position and a rating trend line appear");
+ok(/#1 on the ladder/.test(ui.$("#rk-sub").textContent) && !!ui.$("#rk-trend polyline") && !!ui.$("#rk-trend .chart-grid") && !!ui.$("#rk-trend .chart-point.current"), "my ladder position and detailed rating trend appear");
 const row = ui.$("#rk-recent .recent-row");
 ok(!!row && /Opp/.test(row.textContent) && row.querySelector(".badge.win") && /\+20/.test(row.querySelector(".delta").textContent) && /now 1220/.test(row.textContent) && !!row.querySelector("svg.av"), "recent games: opponent, avatar, WIN, +20, rating after: " + (row && row.textContent.replace(/\s+/g, " ").slice(0, 100)));
 const rows = ui.$$("#rk-ladder-body tbody tr");

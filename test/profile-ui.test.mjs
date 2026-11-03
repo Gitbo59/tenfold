@@ -69,6 +69,7 @@ const pp = await page("#/u/Quin2", pat);
 ok(await pp.until(() => /Quin2/.test(pp.$("#pl-body").textContent) && !!pp.$("#pl-body svg.av")), "opens from the link and shows their name and picture");
 ok(pp.$("#pl-body .pl-nav .pl-back")?.getAttribute("href") === "#/ranked" && pp.$("#pl-body .pl-nav").compareDocumentPosition(pp.$("#pl-body .pl-head")) & 4, "Back to Ranked is a button-like control above the profile header");
 ok(/1200/.test(pp.$("#pl-body .rating-big").textContent) && /Provisional rating/.test(pp.$("#pl-body").textContent) && /member since/.test(pp.$("#pl-body").textContent), "with their rating and member-since");
+ok(pp.$("#pl-body .pl-summary .pl-head") && pp.$("#pl-body .pl-summary .pl-record") && pp.$("#pl-body .pl-games") && (pp.$("#pl-body .pl-summary").compareDocumentPosition(pp.$("#pl-body .pl-games")) & 4), "ranked record shares the profile overview and recent games sit below it");
 ok(!!pp.$(".friend-badge") && !!pp.$("[data-act=remove]") && pp.$$("#pl-body .stat").length === 5 && /No ranked games yet/.test(pp.$("#pl-body").textContent), "a friend: badge, Remove button, full stats and recent games");
 pp.click(pp.$("[data-act=remove]"));
 ok(await pp.until(() => !!pp.$("[data-act=request]") && !pp.$(".friend-badge")), "removing a friend turns the button back into Add friend");

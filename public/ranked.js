@@ -111,14 +111,30 @@
     return stats.map(([n, l]) => `<div class="stat"><span class="stat-n">${esc(n)}</span><span class="stat-l">${l}</span></div>`).join("");
   }
 
+  let trendChartId = 0;
   function trendSvg(values) {
     if (values.length < 2) return '<p class="hint">Play a few matches to see a rating trend.</p>';
-    const W = 240, H = 64, pad = 8;
-    const lo = Math.min(...values), hi = Math.max(...values);
-    const span = Math.max(1, hi - lo);
-    const pts = values.map((v, i) => [pad + (i / (values.length - 1)) * (W - pad * 2), H - pad - ((v - lo) / span) * (H - pad * 2)]);
+    const data = values.map(Number).filter(Number.isFinite);
+    if (data.length < 2) return '<p class="hint">Play a few matches to see a rating trend.</p>';
+    const W = 360, H = 132, left = 42, right = 12, top = 12, bottom = 25;
+    const lo = Math.min(...data), hi = Math.max(...data);
+    const margin = Math.max(12, (hi - lo) * 0.18);
+    const min = lo - margin, max = hi + margin, span = max - min;
+    const x = (i) => left + (i / (data.length - 1)) * (W - left - right);
+    const y = (v) => top + ((max - v) / span) * (H - top - bottom);
+    const pts = data.map((v, i) => [x(i), y(v)]);
     const last = pts[pts.length - 1];
-    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Rating over the last ${values.length - 1} games, from ${values[0]} to ${values[values.length - 1]}"><polyline class="line" points="${pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join(" ")}"/><circle class="dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4"/></svg>`;
+    const coordinates = pts.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`);
+    const line = pts.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+    const area = `${line} L${last[0].toFixed(1)},${(H - bottom).toFixed(1)} L${left},${(H - bottom).toFixed(1)} Z`;
+    const gradientId = `rating-fill-${++trendChartId}`;
+    const guides = [0, 0.5, 1].map((fraction) => {
+      const gy = top + fraction * (H - top - bottom);
+      const value = Math.round(max - fraction * span);
+      return `<line class="chart-grid" x1="${left}" y1="${gy}" x2="${W - right}" y2="${gy}"/><text class="chart-label" x="${left - 7}" y="${gy + 3}" text-anchor="end">${value}</text>`;
+    }).join("");
+    const points = pts.map(([px, py], i) => `<circle class="chart-point${i === pts.length - 1 ? " current" : ""}" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${i === pts.length - 1 ? 4 : 2.4}"/>`).join("");
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating trend across ${data.length - 1} ranked games, from ${data[0]} to ${data[data.length - 1]}"><defs><linearGradient id="${gradientId}" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="var(--bulb)" stop-opacity=".28"/><stop offset="100%" stop-color="var(--bulb)" stop-opacity="0"/></linearGradient></defs>${guides}<path class="chart-area" fill="url(#${gradientId})" d="${area}"/><polyline class="line chart-line" points="${coordinates.join(" ")}"/>${points}<text class="chart-label chart-start" x="${left}" y="${H - 5}">Earlier</text><text class="chart-label chart-end" x="${W - right}" y="${H - 5}" text-anchor="end">Recent</text></svg>`;
   }
   T.statsHtml = statsHtml;
   T.trendSvg = trendSvg;
