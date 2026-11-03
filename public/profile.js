@@ -144,6 +144,7 @@
   let viewing = "";
 
   const badge = (r) => `<span class="badge ${r}">${r === "win" ? "WIN" : r === "loss" ? "LOSS" : "DRAW"}</span>`;
+  const playerStatus = (p) => p.provisional ? "Provisional rating" : "Established player";
 
   function actionsHtml(p) {
     const b = (act, label, primary, extra = "") => `<button class="btn${primary ? " btn-primary" : ""}${extra}" type="button" data-act="${act}">${label}</button>`;
@@ -157,14 +158,16 @@
   }
 
   function renderPlayer(p) {
-    const head = `<div class="pl-head"><span class="profile-avatar">${T.avatar(p.avatar, 96)}</span><div class="who"><h1 class="display profile-name">${esc(p.name)}</h1><p class="hint">${p.provisional ? "Provisional rating" : "Established player"}${p.rank ? `, #${p.rank} on the ladder` : ""}${p.memberSince ? `, member since ${esc(monthName(p.memberSince))}` : ""}</p></div><div class="profile-rating"><span class="rating-big">${p.rating}</span><span class="hint">rating</span></div></div><div class="pl-actions">${actionsHtml(p)}</div>`;
+    const rank = p.rank ? `<span class="pl-detail">Rank <strong>#${p.rank}</strong></span>` : "";
+    const since = p.memberSince ? `<span class="pl-detail">member since <strong>${esc(monthName(p.memberSince))}</strong></span>` : "";
+    const head = `<header class="pl-head panel"><span class="profile-avatar">${T.avatar(p.avatar, 96)}</span><div class="pl-identity"><p class="pl-eyebrow">${playerStatus(p)}</p><h1 class="display profile-name">${esc(p.name)}</h1><div class="pl-details">${rank}${since}</div></div><div class="profile-rating"><span class="rating-big">${p.rating}</span><span class="hint">rating</span></div><div class="pl-actions">${actionsHtml(p)}</div></header>`;
     if (p.restricted) {
-      return head + `<section class="panel"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section>`;
+      return `<div class="pl-page">${head}<section class="panel pl-private"><h2 class="h2">Private profile</h2><p class="hint">${esc(p.name)} only shares their stats and recent games with friends.</p></section></div>`;
     }
     const recent = p.recent.length
-      ? p.recent.map((r) => `<div class="recent-row"><span>${T.avatar(r.opponent.avatar, 32)}</span><span class="who">${plink(r.opponent.name)}<span class="rating">${r.opponent.rating}</span></span>${badge(r.result)}<span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)}, ${T.ago(r.time)}</span></div>`).join("")
-      : '<p class="hint">No ranked games yet.</p>';
-    return head + `<div class="pl-grid"><section class="panel"><h2 class="h2">Ranked record</h2><div class="stat-row">${T.statsHtml(p, p.streak || 0)}</div><div class="trend">${T.trendSvg(p.trend || [])}</div></section><section class="panel"><h2 class="h2">Recent ranked games</h2>${recent}</section></div>`;
+      ? p.recent.map((r) => `<div class="recent-row"><span class="recent-avatar">${T.avatar(r.opponent.avatar, 36)}</span><span class="recent-opponent"><span class="who">${plink(r.opponent.name)}</span><span class="recent-rating">${r.opponent.rating} rating</span></span>${badge(r.result)}<span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)} <span aria-hidden="true">·</span> ${T.ago(r.time)}</span></div>`).join("")
+      : '<div class="pl-empty"><span class="pl-empty-mark" aria-hidden="true">—</span><p class="hint">No ranked games yet.</p></div>';
+    return `<div class="pl-page">${head}<div class="pl-grid"><section class="panel pl-record"><h2 class="h2">Ranked record</h2><div class="stat-row">${T.statsHtml(p, p.streak || 0)}</div><div class="trend">${T.trendSvg(p.trend || [])}</div></section><section class="panel pl-games"><h2 class="h2">Recent ranked games</h2>${recent}</section></div></div>`;
   }
 
   async function loadPlayer() {

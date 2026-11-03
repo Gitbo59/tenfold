@@ -461,13 +461,57 @@ input:disabled { opacity: 0.6; }
 .fr-name { display: grid; gap: 1px; min-width: 0; }
 .fr-name .plink { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-actions { display: flex; gap: 6px; }
-.pl-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 6px 0 18px; }
+.pl-page { display: grid; gap: 20px; }
+.pl-head {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 12px 20px;
+  margin: 6px 0 0; padding: clamp(18px, 3vw, 28px);
+  background: linear-gradient(115deg, var(--panel) 0%, #1a2a9b 100%);
+}
 .pl-head .profile-avatar svg { width: 96px; height: 96px; display: block; }
-.pl-head .who { flex: 1; min-width: 160px; }
-.pl-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; }
+.pl-identity { min-width: 0; display: grid; gap: 8px; }
+.pl-eyebrow { color: var(--bulb); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.pl-identity .profile-name { line-height: 1; }
+.pl-details { display: flex; flex-wrap: wrap; gap: 6px; }
+.pl-detail { display: inline-flex; gap: 4px; align-items: baseline; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 0.82rem; }
+.pl-detail strong { color: var(--chalk); font-weight: 700; }
+.pl-head .profile-rating { justify-items: center; min-width: 92px; padding-left: 18px; border-left: 1px solid var(--line); }
+.pl-head .rating-big { font-size: clamp(2.6rem, 5vw, 3.4rem); }
+.pl-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 16px; border-top: 1px solid var(--line); }
 .friend-badge { background: rgba(34, 214, 162, 0.18); color: var(--ok); font-weight: 700; padding: 6px 14px; border-radius: 999px; }
-.pl-grid { display: grid; gap: 20px; }
-@media (min-width: 900px) { .pl-grid { grid-template-columns: 1.2fr 1fr; align-items: start; } }
+.pl-private { display: grid; gap: 4px; }
+.pl-grid { display: grid; gap: 20px; align-items: start; }
+.pl-record, .pl-games { min-width: 0; }
+.pl-record .stat-row { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); margin-top: 0; }
+.pl-record .trend { margin: 8px 0 0; }
+.pl-games .h2 { margin-bottom: 6px; }
+.recent-row {
+  display: grid; grid-template-columns: 36px minmax(0, 1fr) auto 56px; gap: 4px 12px; align-items: center;
+  padding: 13px 0; border-top: 1px solid var(--line);
+}
+.recent-row:first-of-type { border-top: 0; }
+.recent-avatar { grid-row: 1 / span 2; }
+.recent-avatar .av { width: 36px; height: 36px; }
+.recent-opponent { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.recent-row .who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-rating { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+.recent-row .badge { justify-self: end; }
+.recent-row .delta { justify-self: end; }
+.recent-row .meta { grid-column: 2 / -1; color: var(--muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-empty { display: grid; justify-items: center; gap: 6px; padding: 28px 12px; text-align: center; }
+.pl-empty-mark { color: var(--bulb); font: 800 2rem/1 var(--display); }
+@media (min-width: 900px) { .pl-grid { grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); } }
+@media (max-width: 560px) {
+  .pl-head { grid-template-columns: 64px minmax(0, 1fr); gap: 10px 14px; }
+  .pl-head .profile-avatar { grid-row: 1 / span 2; }
+  .pl-head .profile-avatar svg { width: 64px; height: 64px; }
+  .pl-head .profile-rating { grid-column: 2; display: flex; justify-items: start; align-items: baseline; gap: 8px; min-width: 0; padding: 0; border: 0; }
+  .pl-head .rating-big { font-size: 2rem; }
+  .pl-actions { grid-column: 1 / -1; }
+  .recent-row { grid-template-columns: 32px minmax(0, 1fr) auto 46px; gap: 4px 8px; }
+  .recent-avatar .av { width: 32px; height: 32px; }
+  .recent-opponent { display: grid; gap: 0; }
+  .recent-row .badge { min-width: 3ch; padding-inline: 7px; }
+}
 
 /* ---------- small screens ---------- */
 @media (max-width: 560px) {
