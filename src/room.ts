@@ -8,6 +8,7 @@ import type { Env } from "./types";
 import { num } from "./util";
 
 type Phase = "lobby" | "generating" | "playing" | "finished";
+type PlayMode = "network" | "leader" | "presented";
 
 interface Config {
   lives: number;
@@ -20,6 +21,7 @@ interface Config {
 interface Player {
   id: string;
   name: string;
+  active: boolean;
   lives: number;
   score: number;
   streak: number;
@@ -45,6 +47,7 @@ interface RankedInfo {
 interface Saved {
   initialized: boolean;
   phase: Phase;
+  playMode: PlayMode;
   config: Config;
   topic: string;
   basis: string;
@@ -85,6 +88,7 @@ function defaultState(): Saved {
   return {
     initialized: false,
     phase: "lobby",
+    playMode: "network",
     config: { lives: 3, timerEnabled: true, turnSeconds: 20, preferLatestYear: false, hints: 3 },
     topic: "",
     basis: "",
@@ -153,7 +157,13 @@ export class Room extends DurableObject<Env> {
       const saved = await ctx.storage.get<Saved>("state");
       if (saved) {
         const def = defaultState();
-        this.s = { ...def, ...saved, config: { ...def.config, ...saved.config } };
+        this.s = {
+          ...def,
+          ...saved,
+          playMode: saved.playMode ?? "network",
+          config: { ...def.config, ...saved.config },
+          players: (saved.players ?? []).map((p) => ({ ...p, active: p.active ?? true })),
+        };
         Reflect.deleteProperty(this.s.config, "difficulty");
         // A generation can't survive an eviction, so drop back to the lobby.
         if (this.s.phase === "generating") this.s.phase = "lobby";
@@ -183,7 +193,7 @@ export class Room extends DurableObject<Env> {
       const pl = body?.players;
       if (!body?.matchId || !Array.isArray(pl) || pl.length !== 2 || !Array.isArray(body?.list?.answers) || body.list.answers.length !== 10) return new Response("bad setup", { status: 400 });
       this.s.config = { lives: 3, timerEnabled: true, turnSeconds: 20, preferLatestYear: false, hints: 0 };
-      this.s.players = pl.map((p: any) => ({ id: String(p.id), name: String(p.name).slice(0, 16), lives: 3, score: 0, streak: 0, eliminated: false }));
+      this.s.players = pl.map((p: any) => ({ id: String(p.id), name: String(p.name).slice(0, 16), active: true, lives: 3, score: 0, streak: 0, eliminated: false }));
       this.s.hostId = this.s.players[0].id;
       this.s.topic = String(body.list.title ?? "");
       this.s.basis = String(body.list.basis ?? "");
@@ -326,17 +336,22 @@ export class Room extends DurableObject<Env> {
 
   /** Players who count towards a hint vote: still in the game and connected. */
   private hintVoters(): string[] {
-    return this.s.players.filter((p) => !p.eliminated && this.isConnected(p.id)).map((p) => p.id);
+    if (this.s.playMode !== "network") {
+      const host = this.hostId();
+      return host && this.isConnected(host) ? [host] : [];
+    }
+    return this.s.players.filter((p) => p.active && !p.eliminated && this.isConnected(p.id)).map((p) => p.id);
   }
 
   private snapshot() {
     const { s } = this;
     const finished = s.phase === "finished";
     const cur = s.phase === "playing" ? this.currentPlayer() : undefined;
-    const maxScore = Math.max(0, ...s.players.map((p) => p.score));
+    const maxScore = Math.max(0, ...s.players.filter((p) => p.active).map((p) => p.score));
     return {
       t: "state",
       phase: s.phase,
+      playMode: s.playMode,
       config: s.config,
       topic: s.topic,
       basis: s.basis,
@@ -361,6 +376,7 @@ export class Room extends DurableObject<Env> {
         rating: s.ranked ? s.ranked.players[i]?.rating : undefined,
         id: p.id,
         name: p.name,
+        active: p.active,
         lives: p.lives,
         score: p.score,
         streak: p.streak,
@@ -378,7 +394,7 @@ export class Room extends DurableObject<Env> {
       }),
       wrong: s.wrong,
       log: s.log,
-      winners: finished && maxScore > 0 ? s.players.filter((p) => p.score === maxScore).map((p) => p.id) : [],
+      winners: finished && s.playMode !== "presented" && maxScore > 0 ? s.players.filter((p) => p.active && p.score === maxScore).map((p) => p.id) : [],
     };
   }
 
@@ -461,7 +477,7 @@ export class Room extends DurableObject<Env> {
       for (let n = 2; this.s.players.some((p) => p.name.toLowerCase() === name.toLowerCase()); n++) {
         name = `${base.slice(0, 13)} ${n}`;
       }
-      player = { id: pid, name, lives: this.s.config.lives, score: 0, streak: 0, eliminated: false };
+      player = { id: pid, name, active: true, lives: this.s.config.lives, score: 0, streak: 0, eliminated: false };
       this.s.players.push(player);
       if (!this.s.hostId) this.s.hostId = pid;
       this.addLog("info", `${name} joined the room.`);
@@ -577,13 +593,61 @@ export class Room extends DurableObject<Env> {
     if (this.s.ranked) return;
     if (this.s.phase !== "lobby" || this.hostId() !== me.id) return;
 
+    if (msg.playMode !== undefined && !["network", "leader", "presented"].includes(msg.playMode)) {
+      return this.toast(ws, "Choose a supported For fun play mode.", "error");
+    }
+    const playMode: PlayMode = msg.playMode === "leader" || msg.playMode === "presented" ? msg.playMode : "network";
+    const hasManualList = msg.manual !== undefined;
     const listUrl = typeof msg.listUrl === "string" ? msg.listUrl.trim() : "";
     if (listUrl.length > 2048) return this.toast(ws, "That list URL is too long.", "error");
-    const wantsClassic = !listUrl && typeof msg.classic === "string" && msg.classic.length > 0;
+    if (hasManualList && (listUrl || msg.classic)) return this.toast(ws, "Choose only one list source.", "error");
+    const wantsClassic = !hasManualList && !listUrl && typeof msg.classic === "string" && msg.classic.length > 0;
     const classic = wantsClassic ? getClassic(msg.classic) : undefined;
     if (wantsClassic && !classic) return this.toast(ws, "That built-in list doesn't exist.", "error");
-    const topic = cleanText(msg.topic, 120);
-    if (!classic && !listUrl && topic.length < 3) return this.toast(ws, "Enter a topic first (at least 3 characters), choose a built-in list, or enter a list URL.", "error");
+    const manual = hasManualList ? msg.manual : null;
+    const topic = cleanText(hasManualList ? manual?.title : msg.topic, 120);
+    let manualAnswers: string[] = [];
+    if (hasManualList) {
+      if (!manual || typeof manual !== "object" || !Array.isArray(manual.answers) || manual.answers.length !== 10) {
+        return this.toast(ws, "Enter exactly 10 ranked answers.", "error");
+      }
+      if (topic.length < 3) return this.toast(ws, "Enter a category or list title (at least 3 characters).", "error");
+      if (manual.answers.some((answer: unknown) => typeof answer !== "string" || answer.trim().length > 80)) {
+        return this.toast(ws, "Each answer must contain between 1 and 80 characters.", "error");
+      }
+      const answers = manual.answers.map((answer: unknown) => typeof answer === "string" ? cleanText(answer, 80) : "");
+      if (answers.some((answer: string) => !answer)) return this.toast(ws, "Each of the 10 answers must contain between 1 and 80 characters.", "error");
+      const normalized = answers.map((answer: string) => normalize(answer));
+      if (normalized.some((answer: string) => !answer) || new Set(normalized).size !== 10) {
+        return this.toast(ws, "Enter 10 different answers.", "error");
+      }
+      manualAnswers = answers;
+    } else if (!classic && !listUrl && topic.length < 3) {
+      return this.toast(ws, "Enter a topic first (at least 3 characters), choose a built-in list, or enter a list URL.", "error");
+    }
+
+    const connectedPlayers = this.s.players.filter((p) => this.isConnected(p.id));
+    const requestedIds = Array.isArray(msg.assignedIds) ? [...new Set(msg.assignedIds.filter((id: unknown) => typeof id === "string"))] as string[] : [];
+    const extraNames = Array.isArray(msg.extraPlayers)
+      ? msg.extraPlayers.map((name: unknown) => cleanText(name, 16)).filter((name: string) => name.length > 0)
+      : [];
+    if (playMode === "leader") {
+      if (requestedIds.some((id) => !connectedPlayers.some((p) => p.id === id))) {
+        return this.toast(ws, "Only connected lobby players can be assigned.", "error");
+      }
+      if (extraNames.length > MAX_PLAYERS) return this.toast(ws, `A scored game can have up to ${MAX_PLAYERS} players.`, "error");
+      const selectedNames = connectedPlayers.filter((p) => requestedIds.includes(p.id)).map((p) => normalize(p.name));
+      const guestKeys = extraNames.map((name: string) => normalize(name));
+      if ([...selectedNames, ...guestKeys].some((name, i, all) => !name || all.indexOf(name) !== i)) {
+        return this.toast(ws, "Each assigned player must have a different name.", "error");
+      }
+      if (!requestedIds.length && !extraNames.length) {
+        return this.toast(ws, "Select a lobby player or add a player name to keep score.", "error");
+      }
+      if (requestedIds.length + extraNames.length > MAX_PLAYERS) {
+        return this.toast(ws, `A scored game can have up to ${MAX_PLAYERS} players.`, "error");
+      }
+    }
 
     // Anyone who dropped out of the lobby doesn't get a seat.
     this.s.players = this.s.players.filter((p) => this.isConnected(p.id));
@@ -596,7 +660,17 @@ export class Room extends DurableObject<Env> {
       let list: TopTen;
       let key: string;
       let listDifficulty: Difficulty | null;
-      if (listUrl) {
+      if (hasManualList) {
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([topic, manualAnswers])));
+        key = `custom:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+        list = {
+          title: topic,
+          basis: "Player-created list",
+          source: "",
+          answers: manualAnswers.map((answer) => ({ answer, aliases: [] })),
+        };
+        listDifficulty = null;
+      } else if (listUrl) {
         list = await importListUrl(listUrl);
         const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(list.source));
         key = `imported:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -620,15 +694,39 @@ export class Room extends DurableObject<Env> {
       this.s.listKey = key;
       this.s.listDifficulty = listDifficulty;
       this.s.answers = list.answers.map((x) => ({ answer: x.answer, aliases: [...x.aliases], ...(x.detail ? { detail: x.detail } : {}) }));
+      this.s.playMode = playMode;
+      if (playMode === "network") {
+        for (const p of this.s.players) p.active = true;
+      } else if (playMode === "presented") {
+        for (const p of this.s.players) p.active = p.id === me.id;
+      } else {
+        for (const p of this.s.players) p.active = requestedIds.includes(p.id);
+        for (const name of extraNames) {
+          this.s.players.push({
+            id: `local-${crypto.randomUUID()}`,
+            name,
+            active: true,
+            lives: this.s.config.lives,
+            score: 0,
+            streak: 0,
+            eliminated: false,
+          });
+        }
+      }
       this.s.playedKeys = [...this.s.playedKeys.filter((k) => k !== key), key].slice(-30);
       this.resetRound();
-      this.s.turnIdx = Math.floor(Math.random() * this.s.players.length);
+      const activeIndices = this.s.players.flatMap((p, index) => p.active ? [index] : []);
+      this.s.turnIdx = activeIndices[Math.floor(Math.random() * activeIndices.length)];
       this.s.phase = "playing";
-      this.addLog("info", `${this.s.players[this.s.turnIdx].name} goes first.`);
+      if (playMode === "presented") this.addLog("info", "Audience presentation started. Work together to find all ten answers.");
+      else if (playMode === "leader") this.addLog("info", `${this.s.players[this.s.turnIdx].name} goes first. The leader enters guesses for the roster.`);
+      else this.addLog("info", `${this.s.players[this.s.turnIdx].name} goes first.`);
       this.startTurn();
     } catch (err) {
       console.error("generation failed:", err instanceof AiError ? `${err.message}` : err);
       this.s.phase = "lobby";
+      this.s.playMode = "network";
+      for (const p of this.s.players) p.active = true;
       this.s.topic = "";
       this.toastAll(err instanceof AiError ? err.userMessage : err instanceof Error ? err.message : "Couldn't build that list. Try again.", "error");
     }
@@ -659,7 +757,10 @@ export class Room extends DurableObject<Env> {
 
   private onGuess(ws: WebSocket, me: Player, msg: any): void {
     if (this.s.phase !== "playing") return;
-    if (this.currentPlayer()?.id !== me.id) return this.toast(ws, "It's not your turn yet.");
+    const controlled = this.s.playMode !== "network";
+    if (controlled && this.hostId() !== me.id) return this.toast(ws, "Only the leader can enter guesses in this game.");
+    const player = this.s.playMode === "presented" ? me : this.currentPlayer();
+    if (!player || (this.s.playMode === "network" && player.id !== me.id)) return this.toast(ws, "It's not your turn yet.");
     const guess = cleanText(msg.text, 80);
     if (!guess) return;
 
@@ -674,24 +775,30 @@ export class Room extends DurableObject<Env> {
       const a = this.s.answers[m.index];
       const rank = m.index + 1;
       let speed = 0;
-      if (this.s.config.timerEnabled && this.deadline) {
+      if (this.s.playMode !== "presented" && this.s.config.timerEnabled && this.deadline) {
         const total = this.s.config.turnSeconds * 1000;
         speed = Math.round((3 * Math.max(0, this.deadline - Date.now())) / total);
       }
-      const streak = Math.min(me.streak, 3);
-      const points = 11 - rank + speed + streak; // 1st place is worth 10, 10th place is worth 1
-      a.found = { by: me.id, points, speed, streak };
-      me.streak++;
-      me.score += points;
+      const streak = this.s.playMode === "presented" ? 0 : Math.min(player.streak, 3);
+      const points = this.s.playMode === "presented" ? 0 : 11 - rank + speed + streak; // 1st place is worth 10, 10th place is worth 1
+      a.found = { by: player.id, points, speed, streak };
+      if (this.s.playMode !== "presented") {
+        player.streak++;
+        player.score += points;
+      }
       const note = m.exact ? "" : `, accepting “${guess}”`;
-      this.addLog("correct", `${me.name} found #${rank} ${a.answer} (+${points})${note}.`);
-      this.noteSignals(me, msg, true, rank);
+      this.addLog("correct", this.s.playMode === "presented"
+        ? `The audience found #${rank} ${a.answer}${note}.`
+        : `${player.name} found #${rank} ${a.answer} (+${points})${note}.`);
+      this.noteSignals(player, msg, true, rank);
 
       if (this.s.answers.every((x) => x.found)) {
-        me.score += FINISH_BONUS;
-        this.addLog("bonus", `${me.name} completed the board (+${FINISH_BONUS}).`);
+        if (this.s.playMode !== "presented") {
+          player.score += FINISH_BONUS;
+          this.addLog("bonus", `${player.name} completed the board (+${FINISH_BONUS}).`);
+        }
         this.finish();
-      } else {
+      } else if (this.s.playMode !== "presented") {
         this.advanceTurn();
       }
     } else {
@@ -704,9 +811,13 @@ export class Room extends DurableObject<Env> {
         this.s.wrong.shift();
         this.s.wrongKeys.shift();
       }
-      this.noteSignals(me, msg, false, 0);
-      this.loseLife(me, `${me.name} guessed “${guess}”, which isn't on the list.`, "wrong");
-      this.afterPenalty();
+      this.noteSignals(player, msg, false, 0);
+      if (this.s.playMode === "presented") {
+        this.addLog("wrong", `The audience tried “${guess}”, which isn't on the list.`);
+      } else {
+        this.loseLife(player, `${player.name} guessed “${guess}”, which isn't on the list.`, "wrong");
+        this.afterPenalty();
+      }
     }
     this.checkHints();
     this.persist();
@@ -718,7 +829,8 @@ export class Room extends DurableObject<Env> {
   private onHintVote(ws: WebSocket, me: Player): void {
     if (this.s.ranked) return;
     if (this.s.phase !== "playing") return;
-    if (me.eliminated) return this.toast(ws, "Players who are out can't vote.");
+    if (this.s.playMode !== "network" && this.hostId() !== me.id) return this.toast(ws, "Only the leader can request a hint in this game.");
+    if (this.s.playMode === "network" && me.eliminated) return this.toast(ws, "Players who are out can't vote.");
     if (this.s.hintsLeft <= 0) return this.toast(ws, "There are no hints left this round.");
     const i = this.s.hintVotes.indexOf(me.id);
     if (i >= 0) this.s.hintVotes.splice(i, 1);
@@ -828,6 +940,7 @@ export class Room extends DurableObject<Env> {
     this.clearTimer();
     this.deadline = null;
     this.s.phase = "lobby";
+    this.s.playMode = "network";
     this.s.topic = "";
     this.s.basis = "";
     this.s.source = "";
@@ -835,6 +948,7 @@ export class Room extends DurableObject<Env> {
     this.s.listDifficulty = null;
     this.s.answers = [];
     this.s.players = this.s.players.filter((p) => this.isConnected(p.id));
+    for (const p of this.s.players) p.active = true;
     this.resetRound();
     this.persist();
     this.broadcast();
@@ -880,7 +994,7 @@ export class Room extends DurableObject<Env> {
 
   private currentPlayer(): Player | undefined {
     const p = this.s.players[this.s.turnIdx];
-    return p && !p.eliminated ? p : undefined;
+    return p && p.active && !p.eliminated ? p : undefined;
   }
 
   private clearTimer(): void {
@@ -895,13 +1009,15 @@ export class Room extends DurableObject<Env> {
     if (this.s.phase !== "playing") return;
     const cur = this.currentPlayer();
     if (!cur) return;
-    const alive = this.s.players.filter((p) => !p.eliminated);
-    if (!alive.some((p) => this.isConnected(p.id))) return; // paused until someone returns
+    const alive = this.s.players.filter((p) => p.active && !p.eliminated);
+    if (this.s.playMode === "presented") return;
+    if (this.s.playMode === "network" && !alive.some((p) => this.isConnected(p.id))) return; // paused until someone returns
+    if (this.s.playMode !== "network" && !this.hostId()) return;
 
     this.s.turnStartedAt = Date.now();
     let ms: number | null = null;
     if (this.s.config.timerEnabled) ms = this.s.config.turnSeconds * 1000;
-    else if (!this.isConnected(cur.id)) ms = AWAY_GRACE_MS;
+    else if (this.s.playMode === "network" && !this.isConnected(cur.id)) ms = AWAY_GRACE_MS;
     if (ms === null) return;
 
     this.deadline = Date.now() + ms;
@@ -914,15 +1030,25 @@ export class Room extends DurableObject<Env> {
     if (this.s.phase !== "playing") return;
     const cur = this.currentPlayer();
     if (!cur) return;
-    const alive = this.s.players.filter((p) => !p.eliminated);
-    if (!alive.some((p) => this.isConnected(p.id))) {
+    const alive = this.s.players.filter((p) => p.active && !p.eliminated);
+    if (this.s.playMode === "presented") {
+      this.clearTimer();
+      this.deadline = null;
+      return;
+    }
+    if (this.s.playMode === "network" && !alive.some((p) => this.isConnected(p.id))) {
+      this.clearTimer();
+      this.deadline = null;
+      return;
+    }
+    if (this.s.playMode !== "network" && !this.hostId()) {
       this.clearTimer();
       this.deadline = null;
       return;
     }
     if (this.s.config.timerEnabled) {
       if (!this.timer) this.startTurn();
-    } else if (!this.isConnected(cur.id)) {
+    } else if (this.s.playMode === "network" && !this.isConnected(cur.id)) {
       if (!this.timer) this.startTurn();
     } else if (this.timer) {
       this.clearTimer();
@@ -936,7 +1062,7 @@ export class Room extends DurableObject<Env> {
     this.deadline = null;
     const cur = this.currentPlayer();
     if (!cur) return;
-    if (!this.isConnected(cur.id)) {
+    if (this.s.playMode === "network" && !this.isConnected(cur.id)) {
       this.addLog("info", `${cur.name} is away, so their turn was skipped.`);
       this.advanceTurn();
     } else {
@@ -957,7 +1083,7 @@ export class Room extends DurableObject<Env> {
   }
 
   private afterPenalty(): void {
-    if (this.s.players.every((p) => p.eliminated)) this.finish();
+    if (this.s.players.filter((p) => p.active).every((p) => p.eliminated)) this.finish();
     else if (this.rankedDecided()) this.finish();
     else this.advanceTurn();
   }
@@ -976,7 +1102,7 @@ export class Room extends DurableObject<Env> {
     const n = this.s.players.length;
     for (let i = 1; i <= n; i++) {
       const idx = (this.s.turnIdx + i) % n;
-      if (!this.s.players[idx].eliminated) {
+      if (this.s.players[idx].active && !this.s.players[idx].eliminated) {
         this.s.turnIdx = idx;
         break;
       }
@@ -990,7 +1116,7 @@ export class Room extends DurableObject<Env> {
     this.s.phase = "finished";
     this.s.hintVotes = [];
     for (const p of this.s.players) {
-      if (!p.eliminated && p.lives > 0) {
+      if (p.active && !p.eliminated && p.lives > 0 && this.s.playMode !== "presented") {
         const bonus = p.lives * LIFE_BONUS;
         p.score += bonus;
         this.addLog("bonus", `${p.name} kept ${p.lives} ${p.lives === 1 ? "life" : "lives"} (+${bonus}).`);
@@ -1050,6 +1176,7 @@ export class Room extends DurableObject<Env> {
     if (this.s.phase !== "lobby" || !this.s.ranked || this.s.ranked.result) return;
     if (this.joinTimer) clearTimeout(this.joinTimer);
     this.resetRound();
+    this.s.playMode = "network";
     this.s.turnIdx = Math.floor(Math.random() * 2);
     this.s.phase = "playing";
     this.addLog("info", `Ranked match. ${this.s.players[this.s.turnIdx].name} goes first.`);

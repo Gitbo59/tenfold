@@ -35,6 +35,10 @@
   ];
   let suggestionDifficulty = "easy";
   let selectedSuggestionDifficulty = null;
+  let customListMode = false;
+  let playMode = "network";
+  let assignedPlayerIds = new Set();
+  let localScorePlayers = [];
   const pool = () => (suggestionDifficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
   const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
 
@@ -195,6 +199,10 @@
   function enterRoom(c) {
     code = c;
     leaving = false;
+    customListMode = false;
+    playMode = "network";
+    assignedPlayerIds = new Set([pid]);
+    localScorePlayers = [];
     state = null;
     retries = 0;
     sessionStorage.setItem("tf_room", c);
@@ -334,6 +342,30 @@
     $("#classics-wrap").hidden = !(list && list.length);
   }
 
+  function renderCustomAnswerFields() {
+    $("#custom-answer-fields").innerHTML = Array.from({ length: 10 }, (_, index) =>
+      `<label class="field"><span class="field-label">Answer #${index + 1}</span><input type="text" maxlength="80" data-manual-answer="${index + 1}" autocomplete="off"></label>`,
+    ).join("");
+  }
+
+  function renderPlayOptions(s, isHost) {
+    const connectedIds = new Set(s.players.filter((p) => p.connected).map((p) => p.id));
+    assignedPlayerIds = new Set([...assignedPlayerIds].filter((id) => connectedIds.has(id)));
+    $("#play-options").hidden = !isHost;
+    for (const input of $$('input[name="play-mode"]')) {
+      input.checked = input.value === playMode;
+      input.disabled = !isHost || (customListMode && input.value === "network");
+    }
+    $("#score-roster").hidden = !isHost || playMode !== "leader";
+    $("#score-player-list").innerHTML = s.players
+      .filter((p) => p.connected)
+      .map((p) => `<li><label><input type="checkbox" data-score-player="${esc(p.id)}"${assignedPlayerIds.has(p.id) ? " checked" : ""}> ${esc(p.name)}${p.id === pid ? " (you)" : ""}</label></li>`)
+      .join("");
+    $("#local-score-players").innerHTML = localScorePlayers
+      .map((name, index) => `<li><span>${esc(name)}</span><button type="button" class="btn btn-small" data-remove-local-player="${index}" aria-label="Remove ${esc(name)}">Remove</button></li>`)
+      .join("");
+  }
+
   async function refreshBudget() {
     if (Date.now() - budgetAt < 20000) return;
     budgetAt = Date.now();
@@ -349,6 +381,7 @@
 
   function renderLobby(s, me) {
     const isHost = s.hostId === pid;
+    if (customListMode && playMode === "network") playMode = "leader";
     $("#room-code").innerHTML = [...(code || "")].map((c) => `<span>${esc(c)}</span>`).join("");
     $("#player-count").textContent = `${s.players.length} of 8`;
     $("#lobby-players").innerHTML = s.players
@@ -394,12 +427,22 @@
     // Topic: host only.
     $("#topic").disabled = !isHost;
     $("#topic").closest(".field").hidden = !isHost;
-    $(".topic-tools").hidden = !isHost;
-    $("#classics-wrap").hidden = !isHost || !(s.classics && s.classics.length);
+    $("#list-url").closest(".field").hidden = !isHost || customListMode;
+    $("#btn-custom-list").hidden = !isHost;
+    $("#btn-custom-list").setAttribute("aria-pressed", String(customListMode));
+    $("#btn-custom-list").textContent = customListMode ? "Use a suggested, built-in, or imported list" : "Enter all 10 answers yourself";
+    $("#topic-label").textContent = customListMode ? "Category / list title" : "What should the top ten be about?";
+    $("#topic").placeholder = customListMode ? "Enter a category or list title" : "e.g. Best-selling video game consoles of all time";
+    $("#custom-answers").hidden = !isHost || !customListMode;
+    $(".topic-tools").hidden = !isHost || customListMode;
+    $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     $("#budget-note").hidden = !isHost;
+    renderPlayOptions(s, isHost);
     $("#btn-start").hidden = !isHost;
+    $("#btn-start").textContent = customListMode ? "Start custom list" : playMode === "presented" ? "Start presentation" : "Build the list and start";
     $("#wait-note").hidden = isHost;
     renderClassics(s.classics);
+    $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     if (isHost) refreshBudget();
   }
 
@@ -422,7 +465,8 @@
 
   function renderHints(s, me) {
     const bar = $("#hint-bar");
-    const on = s.phase === "playing" && s.config.hints > 0 && me && !me.eliminated;
+    const canRequest = s.playMode !== "network" ? s.hostId === pid : me && !me.eliminated;
+    const on = s.phase === "playing" && s.config.hints > 0 && canRequest;
     bar.hidden = !on;
     if (!on) return;
     const voted = s.hintVotes.includes(pid);
@@ -439,27 +483,35 @@
 
   function renderGame(s, me) {
     const finished = s.phase === "finished";
-    const isMyTurn = s.phase === "playing" && s.turnPid === pid;
+    const isController = s.playMode !== "network" && s.hostId === pid;
+    const isMyTurn = s.phase === "playing" && (isController || s.turnPid === pid);
     const cur = s.players.find((p) => p.id === s.turnPid);
+    const presented = s.playMode === "presented";
+    const leaderControlled = s.playMode === "leader";
 
     $("#btn-leave").hidden = !!(s.ranked && s.phase === "playing");
     $("#btn-resign").hidden = !(s.ranked && s.phase === "playing" && me);
     $("#g-title").textContent = s.topic;
     $("#g-basis").textContent = s.listDifficulty ? `${s.basis} (${s.listDifficulty} list)` : s.basis;
+    $("#play-mode-note").hidden = !presented;
+    $("#play-mode-note").textContent = presented ? "Audience mode — discuss each guess together. The leader enters answers; there are no scores, lives, or turn timer." : "";
+    $("#turnbar").hidden = presented;
     renderSource(s, finished);
     renderHints(s, me);
 
     // Turn banner
     const turn = $("#turn-text");
     turn.classList.toggle("mine", isMyTurn);
-    if (finished) turn.textContent = "Game over";
+    if (presented) turn.textContent = finished ? "Audience game over" : "The audience is guessing together";
+    else if (finished) turn.textContent = "Game over";
     else if (isMyTurn) turn.textContent = "Your turn";
     else if (cur && !cur.connected) turn.textContent = `${cur.name} is away`;
     else if (cur) turn.textContent = `${cur.name}'s turn`;
     else turn.textContent = "";
+    if (leaderControlled && !finished && cur) turn.textContent = `Enter a guess for ${cur.name}`;
     if (s.phase === "playing" && !s.deadline && s.config.timerEnabled && cur) turn.textContent += " (paused until players reconnect)";
 
-    if (isMyTurn && lastTurnPid !== pid) {
+    if (isMyTurn && lastTurnPid !== s.turnPid) {
       navigator.vibrate?.(60);
       $("#guess").focus({ preventScroll: true });
       resetSignals();
@@ -481,12 +533,12 @@
           const mine = myReports.has(`r${a.rank}`);
           const flagged = a.reports ? `<span class="reported">Flagged x${a.reports}</span>` : "";
           const flag = `<button type="button" class="flag" data-rank="${a.rank}" data-answer="${esc(a.answer)}"${mine ? " disabled" : ""}>${mine ? "Reported" : "Report"}</button>`;
-          const lead = f ? `Found by ${esc(by ? by.name : "someone")}` : "Missed";
+          const lead = f ? presented ? "Found by the audience" : `Found by ${esc(by ? by.name : "someone")}` : "Missed";
           sub = `<span class="sub">${lead}${a.detail ? `, ${esc(a.detail)}` : ""}${flagged}${flag}</span>`;
         } else if (a.hint) {
           hint = `<span class="plate-hint">Hint: ${esc(a.hint)}</span>`;
         }
-        return `<li class="${cls}"><span class="bulb">${a.rank}</span><span class="plate-body">${revealed ? `<span class="ans">${esc(a.answer)}</span>${sub}` : hint}</span><span class="pts">${f ? `+${f.points}${bonus ? `<small>${esc(bonus)}</small>` : ""}` : ""}</span></li>`;
+        return `<li class="${cls}"><span class="bulb">${a.rank}</span><span class="plate-body">${revealed ? `<span class="ans">${esc(a.answer)}</span>${sub}` : hint}</span><span class="pts">${f && !presented ? `+${f.points}${bonus ? `<small>${esc(bonus)}</small>` : ""}` : ""}</span></li>`;
       })
       .join("");
 
@@ -505,7 +557,8 @@
       for (let i = 0; i < s.config.lives; i++) h += `<svg class="heart ${i < p.lives ? "" : "lost"}"><use href="#i-heart"/></svg>`;
       return `<span class="hearts" aria-label="${p.lives} lives">${h}</span>`;
     };
-    $("#players").innerHTML = s.players
+    $("#players").hidden = presented;
+    $("#players").innerHTML = s.players.filter((p) => p.active !== false)
       .map((p) => {
         const cls = ["player", p.id === s.turnPid ? "turn" : "", p.eliminated ? "out" : ""].join(" ");
         const status = p.eliminated ? "Out" : !p.connected ? "Away" : p.streak >= 2 ? `${p.streak} in a row` : "";
@@ -529,21 +582,23 @@
 
     // Guess bar
     const input = $("#guess");
-    const canGuess = isMyTurn;
+    const canGuess = isMyTurn && (s.playMode === "network" || isController);
     input.disabled = !canGuess;
     $("#btn-guess").disabled = !canGuess;
     $("#guess-form").dataset.state = canGuess ? "mine" : "wait";
-    input.placeholder = finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
+    input.placeholder = presented && !finished ? "Enter the audience's guess" : leaderControlled && !finished ? `Guess for ${cur ? cur.name : "the current player"}` : finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
     $("#guess-form").hidden = finished;
 
     // Results
     $("#results").hidden = !finished;
     if (finished) {
-      const sorted = [...s.players].sort((a, b) => b.score - a.score);
-      const winners = s.players.filter((p) => s.winners.includes(p.id));
+      const activePlayers = s.players.filter((p) => p.active !== false);
+      const sorted = [...activePlayers].sort((a, b) => b.score - a.score);
+      const winners = activePlayers.filter((p) => s.winners.includes(p.id));
       let title;
-      if (!winners.length) title = "Nobody scored this round";
-      else if (s.players.length === 1) title = `You scored ${winners[0].score} points`;
+      if (presented) title = "The audience found all 10 answers!";
+      else if (!winners.length) title = "Nobody scored this round";
+      else if (activePlayers.length === 1) title = winners[0].id === pid ? `You scored ${winners[0].score} points` : `${winners[0].name} scored ${winners[0].score} points`;
       else if (winners.length === 1) title = `${winners[0].name} wins with ${winners[0].score} points`;
       else title = `${winners.map((w) => w.name).join(" and ")} tie on ${winners[0].score} points`;
       let ratingLine = "";
@@ -567,6 +622,7 @@
       rl.hidden = !ratingLine;
       rl.textContent = ratingLine;
       let place = 0, prev = null;
+      $("#res-list").hidden = presented;
       $("#res-list").innerHTML = sorted
         .map((p, i) => {
           if (p.score !== prev) place = i + 1;
@@ -576,7 +632,7 @@
         .join("");
       const isHost = s.hostId === pid;
       $("#btn-rematch").hidden = !!s.ranked || !isHost;
-      $("#res-wait").hidden = !!s.ranked || isHost || !me;
+      $("#res-wait").hidden = presented || !!s.ranked || isHost || !me;
       $("#btn-ranked-back").hidden = !s.ranked;
     }
     tick();
@@ -751,13 +807,86 @@
     $("#topic").value = pick(1)[0];
     renderChips();
   });
+  $("#btn-custom-list").addEventListener("click", () => {
+    customListMode = !customListMode;
+    if (customListMode) playMode = "leader";
+    else if (playMode === "leader" && !localScorePlayers.length) playMode = "network";
+    selectedClassic = null;
+    selectedSuggestionDifficulty = null;
+    $("#list-url").value = "";
+    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    render();
+  });
+  for (const input of $$('input[name="play-mode"]')) {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      playMode = input.value;
+      render();
+    });
+  }
+  $("#score-player-list").addEventListener("change", (e) => {
+    const checkbox = e.target.closest("[data-score-player]");
+    if (!checkbox) return;
+    if (checkbox.checked) assignedPlayerIds.add(checkbox.dataset.scorePlayer);
+    else assignedPlayerIds.delete(checkbox.dataset.scorePlayer);
+  });
+  $("#score-player-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#score-player-name");
+    const name = input.value.trim().slice(0, 16);
+    if (!name) return input.focus();
+    const rosterNames = [
+      ...[...(state?.players ?? [])].filter((p) => assignedPlayerIds.has(p.id)).map((p) => p.name),
+      ...localScorePlayers,
+    ];
+    if (rosterNames.some((playerName) => playerName.toLowerCase() === name.toLowerCase())) {
+      toast("Each scored player needs a different name.", "error");
+      return input.focus();
+    }
+    if (rosterNames.length >= 8) {
+      toast("A scored game can have up to 8 players.", "error");
+      return input.focus();
+    }
+    localScorePlayers.push(name);
+    input.value = "";
+    if (state) render();
+    input.focus();
+  });
+  $("#local-score-players").addEventListener("click", (e) => {
+    const button = e.target.closest("[data-remove-local-player]");
+    if (!button) return;
+    localScorePlayers.splice(Number(button.dataset.removeLocalPlayer), 1);
+    if (state) render();
+  });
   $("#btn-start").addEventListener("click", () => {
+    if (playMode === "leader" && !assignedPlayerIds.size && !localScorePlayers.length) {
+      toast("Select a lobby player or add a player name to keep score.", "error");
+      return;
+    }
     const topic = $("#topic").value.trim();
+    if (customListMode) {
+      const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
+      if (topic.length < 3) { toast("Enter a category or list title first.", "error"); return $("#topic").focus(); }
+      if (answers.some((answer) => !answer)) {
+        toast("Enter all 10 answers in rank order.", "error");
+        return $$("[data-manual-answer]").find((input) => !input.value.trim())?.focus();
+      }
+      return send({
+        t: "start",
+        playMode,
+        ...(playMode === "leader" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
+        manual: { title: topic, answers },
+      });
+    }
+    const options = {
+      playMode,
+      ...(playMode === "leader" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
+    };
     const listUrl = $("#list-url").value.trim();
-    if (listUrl) return send({ t: "start", listUrl });
-    if (selectedClassic) return send({ t: "start", classic: selectedClassic });
+    if (listUrl) return send({ t: "start", ...options, listUrl });
+    if (selectedClassic) return send({ t: "start", ...options, classic: selectedClassic });
     if (topic.length < 3) { toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error"); return $("#topic").focus(); }
-    send({ t: "start", topic, ...(selectedSuggestionDifficulty ? { difficulty: selectedSuggestionDifficulty } : {}) });
+    send({ t: "start", ...options, topic, ...(selectedSuggestionDifficulty ? { difficulty: selectedSuggestionDifficulty } : {}) });
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });
 
@@ -888,6 +1017,7 @@
   // ------------------------------------------------------------------ boot
   buildSample();
   renderChips();
+  renderCustomAnswerFields();
   $("#name").value = localStorage.getItem("tf_name") || "";
   const linked = new URLSearchParams(location.search).get("room");
   const saved = sessionStorage.getItem("tf_room");

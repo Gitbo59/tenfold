@@ -93,6 +93,10 @@ input[type="text"], input:not([type]), input[type="search"] {
   width: 100%; background: var(--stage-deep); border: 2px solid var(--line); border-radius: 10px;
   padding: 12px 14px; font-size: 1rem; /* 16px+ stops iOS zooming on focus */
 }
+input[type="url"] {
+  width: 100%; min-width: 0; background: var(--stage-deep); border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px; padding: 12px 14px; font-size: 1rem; color: var(--chalk);
+}
 input::placeholder { color: #7f89d6; }
 input:focus { border-color: var(--bulb); outline: none; }
 input:disabled { opacity: 0.6; }
@@ -214,7 +218,27 @@ input:disabled { opacity: 0.6; }
 .range-val { font-weight: 700; font-size: 0.95rem; }
 
 .topic-tools { display: grid; gap: 8px; margin-top: 12px; }
+.play-options { display: grid; gap: 10px; min-width: 0; margin: 0 0 18px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.play-options legend { padding: 0 6px; font-weight: 800; }
+.play-option { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.play-option input { margin-top: 4px; accent-color: var(--bulb); }
+.play-option span { display: grid; gap: 3px; }
+.play-option small { color: var(--muted); line-height: 1.4; }
+.score-roster { display: grid; gap: 8px; padding-top: 6px; }
+.score-player-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.score-player-list li { display: flex; align-items: center; gap: 9px; }
+.score-player-list input { accent-color: var(--bulb); }
+.score-player-form { display: flex; gap: 8px; }
+.score-player-form input { flex: 1; min-width: 0; }
+.local-score-players:empty { display: none; }
+.presentation-note { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--stage-deep); text-align: center; font-weight: 700; }
 .suggestion-style { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
+.custom-list-toggle { margin-top: 12px; }
+.custom-answers { display: grid; gap: 10px; min-width: 0; margin: 14px 0 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.custom-answers legend { padding: 0 6px; font-weight: 700; }
+.custom-answer-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.custom-answer-fields input { width: 100%; min-width: 0; background: var(--stage-deep); border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 10px; padding: 10px 12px; color: var(--chalk); }
+@media (max-width: 560px) { .custom-answer-fields { grid-template-columns: minmax(0, 1fr); } }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   appearance: none; cursor: pointer; border: 1px solid var(--line); background: var(--stage-deep); color: var(--chalk);

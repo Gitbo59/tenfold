@@ -7,6 +7,7 @@ const ok = (c, m) => { console.log(c ? "  PASS" : "  FAIL", m); if (!c) failures
 const errors = []; const vc = new VirtualConsole();
 vc.on("jsdomError", (e) => errors.push(e.message)); vc.on("error", (e) => errors.push(String(e)));
 const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8").replace(/<link[^>]*fonts[^>]*>/g, "").replace(/<script src="\/app.js" defer><\/script>/, "");
+const css = fs.readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
 const dom = new JSDOM(html, { url: BASE + "/", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
 const w = dom.window; w.fetch = (u, o) => fetch(new URL(u, BASE), o);
 let audioStarts = 0;
@@ -32,6 +33,7 @@ const code = $$("#room-code span").map((s) => s.textContent).join("");
 console.log("lobby controls");
 ok($$("#classics .chip").length === 6, "six built-in lists offered");
 ok($("#list-url").type === "url" && $("#prefer-latest-year").type === "checkbox" && $("#prefer-latest-year").closest(".settings"), "the latest-year preference sits with match settings");
+ok(/input\[type="url"\][\s\S]*?color:\s*var\(--chalk\)/.test(css) && /input\[type="url"\][\s\S]*?background:\s*var\(--stage-deep\)/.test(css), "the list URL input uses readable text on the dark input background");
 ok(await until(() => /Free AI lists left today: \d+ of \d+/.test($("#budget-note").textContent)), "host sees the free-AI budget note: " + $("#budget-note").textContent.slice(0, 60));
 ok($$(".seg").length === 2 && $(".seg[data-diff=easy]").getAttribute("aria-checked") === "true", "difficulty defaults to Easy");
 ok($("#hints-val").textContent === "3", "hints default to 3");
@@ -124,6 +126,44 @@ click($("#btn-rematch"));
 ok(await until(() => visible("#screen-lobby")) && $$("#classics .chip").length === 6, "back in the lobby with built-in lists offered again");
 
 console.log("AI round with Hard difficulty");
+click($("#btn-custom-list"));
+ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer]").length === 10 && $("#topic-label").textContent === "Category / list title" && $(".topic-tools").hidden && $("#classics-wrap").hidden && $('input[name="play-mode"][value="leader"]').checked, "custom-list mode offers ten ranked answers and defaults to leader-controlled play");
+ok(!$("#score-roster").hidden && $$("#score-player-list input:checked").some((input) => input.dataset.scorePlayer === w.sessionStorage.getItem("tf_pid")), "the leader can score a solo custom list without another lobby player");
+$("#score-player-name").value = "Local guest";
+$("#score-player-form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
+ok($$("#local-score-players li").length === 1, "the leader can add a local player to the scored roster");
+$("#topic").value = "My custom category";
+for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Custom answer ${index + 1}`;
+click($("#btn-start"));
+ok(await until(() => visible("#screen-game"), 8000) && $("#g-title").textContent === "My custom category" && $("#g-basis").textContent.includes("Player-created list"), "the manual category starts as a player-created list");
+ok($$("#players .player").length === 2 && $$("#players .player").some((p) => p.textContent.includes("Local guest")), "the local player is included in the score roster");
+const manualAnswers = Array.from({ length: 10 }, (_, i) => `Custom answer ${i + 1}`);
+for (let i = 0; i < manualAnswers.length; i++) {
+  ok(await until(() => turnIsMine()), `leader can enter custom answer ${i + 1} for the current player`);
+  submitGuess(manualAnswers[i]);
+  ok(await until(() => $$("#board .plate.found").length >= i + 1 || visible("#results")), `custom answer ${i + 1} is accepted`);
+}
+ok(await until(() => visible("#results")), "the custom round completes normally");
+click($("#btn-rematch"));
+ok(await until(() => visible("#screen-lobby")), "rematch returns to the lobby after custom play");
+click($('input[name="play-mode"][value="presented"]'));
+$("#topic").value = "Audience category";
+for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Audience answer ${index + 1}`;
+click($("#btn-start"));
+ok(await until(() => visible("#screen-game") && bobState?.playMode === "presented"), "the curated list can also be started in no-score audience mode");
+ok($("#turnbar").hidden && $("#players").hidden && !$("#play-mode-note").hidden, "audience mode is presented without turn or score UI");
+const livesAtStart = bobState.players.find((p) => p.id === w.sessionStorage.getItem("tf_pid")).lives;
+submitGuess("Audience wrong guess");
+ok(await until(() => bobState.wrong.includes("Audience wrong guess")) && bobState.players.find((p) => p.id === w.sessionStorage.getItem("tf_pid")).lives === livesAtStart, "audience wrong guesses do not cost lives");
+for (let i = 0; i < 10; i++) {
+  submitGuess(`Audience answer ${i + 1}`);
+  ok(await until(() => $$("#board .plate.found").length >= i + 1 || visible("#results")), `audience finds answer ${i + 1}`);
+}
+ok(await until(() => visible("#results")) && $("#res-title").textContent.includes("audience found all 10") && $("#res-list").hidden, "audience clears the board without a score table");
+click($("#btn-rematch"));
+ok(await until(() => visible("#screen-lobby")), "audience round can be rematched");
+click($("#btn-custom-list"));
+click($('input[name="play-mode"][value="network"]'));
 click($(".seg[data-diff=hard]"));
 click($("#topic-chips .chip"));
 click($("#btn-start"));

@@ -392,14 +392,44 @@
 
         <div class="panel topic" id="topic-panel">
           <h2 class="h2">Topic</h2>
+          <fieldset id="play-options" class="play-options">
+            <legend>How do you want to play?</legend>
+            <label class="play-option">
+              <input type="radio" name="play-mode" value="network" checked>
+              <span><strong>Players take turns on their devices</strong><small>Everyone answers for themselves and earns points.</small></span>
+            </label>
+            <label class="play-option">
+              <input type="radio" name="play-mode" value="leader">
+              <span><strong>Leader enters guesses and keeps score</strong><small>Choose lobby players or add local players to the scoreboard.</small></span>
+            </label>
+            <label class="play-option">
+              <input type="radio" name="play-mode" value="presented">
+              <span><strong>Present to an audience (no score)</strong><small>The leader enters the audience’s guesses; wrong answers cost no lives.</small></span>
+            </label>
+            <div id="score-roster" class="score-roster" hidden>
+              <p class="hint">Select connected lobby players, or add people who are sharing this device.</p>
+              <ul id="score-player-list" class="score-player-list"></ul>
+              <form id="score-player-form" class="score-player-form" autocomplete="off">
+                <input id="score-player-name" maxlength="16" placeholder="Add a player name" aria-label="Local player name">
+                <button class="btn btn-small" type="submit">Add player</button>
+              </form>
+              <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
+            </div>
+          </fieldset>
           <label class="field">
-            <span class="field-label">What should the top ten be about?</span>
+            <span id="topic-label" class="field-label">What should the top ten be about?</span>
             <input id="topic" maxlength="120" placeholder="e.g. Best-selling video game consoles of all time">
           </label>
           <label class="field">
             <span class="field-label">Or import a ranked list from a webpage</span>
             <input id="list-url" type="url" maxlength="2048" placeholder="https://example.com/top-ten">
           </label>
+          <button id="btn-custom-list" class="btn btn-small custom-list-toggle" type="button" aria-pressed="false">Enter all 10 answers yourself</button>
+          <fieldset id="custom-answers" class="custom-answers" hidden>
+            <legend>Ranked answers, from #1 to #10</legend>
+            <p class="hint">Enter the answers in order. All ten must be different.</p>
+            <div id="custom-answer-fields" class="custom-answer-fields"></div>
+          </fieldset>
           <div class="topic-tools">
             <div class="suggestion-style">
               <div class="setting-text">
@@ -439,6 +469,7 @@
       <div class="game-head">
         <h2 id="g-title" class="display game-title"></h2>
         <p id="g-basis" class="basis"></p>
+        <p id="play-mode-note" class="presentation-note" hidden></p>
         <div class="source-row">
           <button id="btn-source" class="btn btn-small" type="button" aria-expanded="false" aria-controls="source-line">Show source</button>
           <p id="source-line" class="source-line" hidden></p>
