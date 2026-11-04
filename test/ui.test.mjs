@@ -63,6 +63,7 @@ $("#timer-on").checked = false; $("#timer-on").dispatchEvent(new w.Event("change
 ok(await until(() => bobState.config.timerEnabled === false), "time limit switched off (keeps the test deterministic)");
 
 console.log("built-in list round");
+click($('input[name="play-mode"][value="network"]'));
 const chip = $$("#classics .chip").find((c) => c.dataset.id === "mountains"); click(chip);
 ok($("#topic").value === "Highest mountains in the world" && chip.getAttribute("aria-pressed") === "true", "picking a built-in list fills the topic and marks it selected");
 click($("#btn-start"));
@@ -127,8 +128,8 @@ ok(await until(() => visible("#screen-lobby")) && $$("#classics .chip").length =
 
 console.log("AI round with Hard difficulty");
 click($("#btn-custom-list"));
-ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer]").length === 10 && $("#topic-label").textContent === "Category / list title" && $(".topic-tools").hidden && $("#classics-wrap").hidden && $('input[name="play-mode"][value="leader"]').checked, "custom-list mode offers ten ranked answers and defaults to leader-controlled play");
-ok(!$("#score-roster").hidden && $$("#score-player-list input:checked").some((input) => input.dataset.scorePlayer === w.sessionStorage.getItem("tf_pid")), "the leader can score a solo custom list without another lobby player");
+ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer]").length === 10 && $("#topic-label").textContent === "Category / list title" && $(".topic-tools").hidden && $("#classics-wrap").hidden && $('input[name="play-mode"][value="automatic"]').checked, "custom-list mode offers ten ranked answers and defaults to automatic scoring/presentation");
+ok(!$("#score-roster").hidden && $$("#score-player-list input:checked").some((input) => input.dataset.scorePlayer === w.sessionStorage.getItem("tf_pid")), "the leader is included automatically in the score roster");
 $("#score-player-name").value = "Local guest";
 $("#score-player-form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
 ok($$("#local-score-players li").length === 1, "the leader can add a local player to the scored roster");
@@ -136,7 +137,7 @@ $("#topic").value = "My custom category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Custom answer ${index + 1}`;
 click($("#btn-start"));
 ok(await until(() => visible("#screen-game"), 8000) && $("#g-title").textContent === "My custom category" && $("#g-basis").textContent.includes("Player-created list"), "the manual category starts as a player-created list");
-ok($$("#players .player").length === 2 && $$("#players .player").some((p) => p.textContent.includes("Local guest")), "the local player is included in the score roster");
+ok($$("#players .player").length === 3 && $$("#players .player").some((p) => p.textContent.includes("Local guest")), "connected and local players are included in the score roster");
 const manualAnswers = Array.from({ length: 10 }, (_, i) => `Custom answer ${i + 1}`);
 for (let i = 0; i < manualAnswers.length; i++) {
   ok(await until(() => turnIsMine()), `leader can enter custom answer ${i + 1} for the current player`);
@@ -146,7 +147,12 @@ for (let i = 0; i < manualAnswers.length; i++) {
 ok(await until(() => visible("#results")), "the custom round completes normally");
 click($("#btn-rematch"));
 ok(await until(() => visible("#screen-lobby")), "rematch returns to the lobby after custom play");
-click($('input[name="play-mode"][value="presented"]'));
+const bobScoreBox = $(`#score-player-list [data-score-player="${bobPid}"]`);
+if (bobScoreBox?.checked) {
+  bobScoreBox.checked = false;
+  bobScoreBox.dispatchEvent(new w.Event("change", { bubbles: true }));
+}
+click($("#local-score-players [data-remove-local-player]"));
 $("#topic").value = "Audience category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Audience answer ${index + 1}`;
 click($("#btn-start"));

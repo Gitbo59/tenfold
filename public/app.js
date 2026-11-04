@@ -36,8 +36,9 @@
   let suggestionDifficulty = "easy";
   let selectedSuggestionDifficulty = null;
   let customListMode = false;
-  let playMode = "network";
+  let playMode = "automatic";
   let assignedPlayerIds = new Set();
+  let scoreRosterEdited = false;
   let localScorePlayers = [];
   const pool = () => (suggestionDifficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
   const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
@@ -200,8 +201,9 @@
     code = c;
     leaving = false;
     customListMode = false;
-    playMode = "network";
-    assignedPlayerIds = new Set([pid]);
+    playMode = "automatic";
+    assignedPlayerIds = new Set();
+    scoreRosterEdited = false;
     localScorePlayers = [];
     state = null;
     retries = 0;
@@ -349,17 +351,29 @@
   }
 
   function renderPlayOptions(s, isHost) {
-    const connectedIds = new Set(s.players.filter((p) => p.connected).map((p) => p.id));
+    const connectedPlayers = s.players.filter((p) => p.connected);
+    const connectedIds = new Set(connectedPlayers.map((p) => p.id));
     assignedPlayerIds = new Set([...assignedPlayerIds].filter((id) => connectedIds.has(id)));
+    if (!scoreRosterEdited) assignedPlayerIds = new Set(connectedIds);
+    const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
+    const effectivePlayMode = playMode === "network" ? "network" : additionalPlayers > 0 ? "leader" : "presented";
     $("#play-options").hidden = !isHost;
     for (const input of $$('input[name="play-mode"]')) {
       input.checked = input.value === playMode;
-      input.disabled = !isHost || (customListMode && input.value === "network");
+      input.disabled = !isHost || (input.value === "network" && (customListMode || connectedPlayers.length < 2));
     }
-    $("#score-roster").hidden = !isHost || playMode !== "leader";
+    $("#auto-play-title").textContent = effectivePlayMode === "network"
+      ? "Players take turns on their own devices"
+      : effectivePlayMode === "presented" ? "Present the game to an audience" : "Leader enters guesses and keeps score";
+    $("#auto-play-note").textContent = effectivePlayMode === "network"
+      ? "Everyone answers for themselves and earns points."
+      : effectivePlayMode === "presented"
+        ? "No other players selected. The leader enters guesses with no score; add players below to turn scoring on."
+        : `Scoring is on for ${additionalPlayers + 1} players. The leader enters guesses for the current player.`;
+    $("#score-roster").hidden = !isHost || playMode === "network";
     $("#score-player-list").innerHTML = s.players
       .filter((p) => p.connected)
-      .map((p) => `<li><label><input type="checkbox" data-score-player="${esc(p.id)}"${assignedPlayerIds.has(p.id) ? " checked" : ""}> ${esc(p.name)}${p.id === pid ? " (you)" : ""}</label></li>`)
+      .map((p) => `<li><label><input type="checkbox" data-score-player="${esc(p.id)}"${assignedPlayerIds.has(p.id) ? " checked" : ""}${p.id === pid ? " disabled" : ""}> ${esc(p.name)}${p.id === pid ? " (leader, included automatically)" : ""}</label></li>`)
       .join("");
     $("#local-score-players").innerHTML = localScorePlayers
       .map((name, index) => `<li><span>${esc(name)}</span><button type="button" class="btn btn-small" data-remove-local-player="${index}" aria-label="Remove ${esc(name)}">Remove</button></li>`)
@@ -381,7 +395,6 @@
 
   function renderLobby(s, me) {
     const isHost = s.hostId === pid;
-    if (customListMode && playMode === "network") playMode = "leader";
     $("#room-code").innerHTML = [...(code || "")].map((c) => `<span>${esc(c)}</span>`).join("");
     $("#player-count").textContent = `${s.players.length} of 8`;
     $("#lobby-players").innerHTML = s.players
@@ -439,7 +452,8 @@
     $("#budget-note").hidden = !isHost;
     renderPlayOptions(s, isHost);
     $("#btn-start").hidden = !isHost;
-    $("#btn-start").textContent = customListMode ? "Start custom list" : playMode === "presented" ? "Start presentation" : "Build the list and start";
+    const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
+    $("#btn-start").textContent = playMode !== "network" && additionalPlayers === 0 ? "Start presentation" : customListMode ? "Start custom list" : "Build the list and start";
     $("#wait-note").hidden = isHost;
     renderClassics(s.classics);
     $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
@@ -809,8 +823,7 @@
   });
   $("#btn-custom-list").addEventListener("click", () => {
     customListMode = !customListMode;
-    if (customListMode) playMode = "leader";
-    else if (playMode === "leader" && !localScorePlayers.length) playMode = "network";
+    if (customListMode && playMode === "network") playMode = "automatic";
     selectedClassic = null;
     selectedSuggestionDifficulty = null;
     $("#list-url").value = "";
@@ -827,6 +840,7 @@
   $("#score-player-list").addEventListener("change", (e) => {
     const checkbox = e.target.closest("[data-score-player]");
     if (!checkbox) return;
+    scoreRosterEdited = true;
     if (checkbox.checked) assignedPlayerIds.add(checkbox.dataset.scorePlayer);
     else assignedPlayerIds.delete(checkbox.dataset.scorePlayer);
   });
@@ -848,6 +862,7 @@
       return input.focus();
     }
     localScorePlayers.push(name);
+    scoreRosterEdited = true;
     input.value = "";
     if (state) render();
     input.focus();
@@ -856,13 +871,10 @@
     const button = e.target.closest("[data-remove-local-player]");
     if (!button) return;
     localScorePlayers.splice(Number(button.dataset.removeLocalPlayer), 1);
+    scoreRosterEdited = true;
     if (state) render();
   });
   $("#btn-start").addEventListener("click", () => {
-    if (playMode === "leader" && !assignedPlayerIds.size && !localScorePlayers.length) {
-      toast("Select a lobby player or add a player name to keep score.", "error");
-      return;
-    }
     const topic = $("#topic").value.trim();
     if (customListMode) {
       const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
@@ -874,13 +886,13 @@
       return send({
         t: "start",
         playMode,
-        ...(playMode === "leader" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
+        ...(playMode === "automatic" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
         manual: { title: topic, answers },
       });
     }
     const options = {
       playMode,
-      ...(playMode === "leader" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
+      ...(playMode === "automatic" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
     };
     const listUrl = $("#list-url").value.trim();
     if (listUrl) return send({ t: "start", ...options, listUrl });

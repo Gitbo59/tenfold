@@ -392,30 +392,6 @@
 
         <div class="panel topic" id="topic-panel">
           <h2 class="h2">Topic</h2>
-          <fieldset id="play-options" class="play-options">
-            <legend>How do you want to play?</legend>
-            <label class="play-option">
-              <input type="radio" name="play-mode" value="network" checked>
-              <span><strong>Players take turns on their devices</strong><small>Everyone answers for themselves and earns points.</small></span>
-            </label>
-            <label class="play-option">
-              <input type="radio" name="play-mode" value="leader">
-              <span><strong>Leader enters guesses and keeps score</strong><small>Choose lobby players or add local players to the scoreboard.</small></span>
-            </label>
-            <label class="play-option">
-              <input type="radio" name="play-mode" value="presented">
-              <span><strong>Present to an audience (no score)</strong><small>The leader enters the audience’s guesses; wrong answers cost no lives.</small></span>
-            </label>
-            <div id="score-roster" class="score-roster" hidden>
-              <p class="hint">Select connected lobby players, or add people who are sharing this device.</p>
-              <ul id="score-player-list" class="score-player-list"></ul>
-              <form id="score-player-form" class="score-player-form" autocomplete="off">
-                <input id="score-player-name" maxlength="16" placeholder="Add a player name" aria-label="Local player name">
-                <button class="btn btn-small" type="submit">Add player</button>
-              </form>
-              <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
-            </div>
-          </fieldset>
           <label class="field">
             <span id="topic-label" class="field-label">What should the top ten be about?</span>
             <input id="topic" maxlength="120" placeholder="e.g. Best-selling video game consoles of all time">
@@ -448,6 +424,26 @@
             <h3 class="h3">Built-in lists (no AI needed)</h3>
             <div id="classics" class="chips"></div>
           </div>
+          <fieldset id="play-options" class="play-options">
+            <legend>Players and scoring</legend>
+            <label class="play-option">
+              <input type="radio" name="play-mode" value="automatic" checked>
+              <span><strong id="auto-play-title">Present the game to an audience</strong><small id="auto-play-note">The leader enters guesses with no score. Add players below to turn scoring on.</small></span>
+            </label>
+            <label class="play-option">
+              <input type="radio" name="play-mode" value="network">
+              <span><strong>Players take turns on their own devices</strong><small>Everyone answers for themselves and earns points.</small></span>
+            </label>
+            <div id="score-roster" class="score-roster">
+              <p class="hint">The leader is included automatically when scoring is on. Select connected players or add names for people sharing this device.</p>
+              <ul id="score-player-list" class="score-player-list"></ul>
+              <form id="score-player-form" class="score-player-form" autocomplete="off">
+                <input id="score-player-name" maxlength="16" placeholder="Add a player name" aria-label="Local player name">
+                <button class="btn btn-small" type="submit">Add player</button>
+              </form>
+              <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
+            </div>
+          </fieldset>
           <p id="budget-note" class="hint budget-note"></p>
           <button id="btn-start" class="btn btn-primary btn-big" type="button">Build the list and start</button>
           <p id="wait-note" class="hint" hidden>Waiting for the leader to pick a topic. It stays secret until the game starts.</p>

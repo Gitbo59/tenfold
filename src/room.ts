@@ -593,10 +593,10 @@ export class Room extends DurableObject<Env> {
     if (this.s.ranked) return;
     if (this.s.phase !== "lobby" || this.hostId() !== me.id) return;
 
-    if (msg.playMode !== undefined && !["network", "leader", "presented"].includes(msg.playMode)) {
+    if (msg.playMode !== undefined && !["network", "leader", "presented", "automatic"].includes(msg.playMode)) {
       return this.toast(ws, "Choose a supported For fun play mode.", "error");
     }
-    const playMode: PlayMode = msg.playMode === "leader" || msg.playMode === "presented" ? msg.playMode : "network";
+    let playMode: PlayMode = msg.playMode === "network" || msg.playMode === undefined ? "network" : "presented";
     const hasManualList = msg.manual !== undefined;
     const listUrl = typeof msg.listUrl === "string" ? msg.listUrl.trim() : "";
     if (listUrl.length > 2048) return this.toast(ws, "That list URL is too long.", "error");
@@ -627,26 +627,26 @@ export class Room extends DurableObject<Env> {
     }
 
     const connectedPlayers = this.s.players.filter((p) => this.isConnected(p.id));
+    if (hasManualList && playMode === "network") playMode = "presented";
+    if (playMode === "network" && connectedPlayers.length < 2) playMode = "presented";
     const requestedIds = Array.isArray(msg.assignedIds) ? [...new Set(msg.assignedIds.filter((id: unknown) => typeof id === "string"))] as string[] : [];
     const extraNames = Array.isArray(msg.extraPlayers)
       ? msg.extraPlayers.map((name: unknown) => cleanText(name, 16)).filter((name: string) => name.length > 0)
       : [];
-    if (playMode === "leader") {
+    if (playMode !== "network" && msg.playMode !== "presented") {
       if (requestedIds.some((id) => !connectedPlayers.some((p) => p.id === id))) {
         return this.toast(ws, "Only connected lobby players can be assigned.", "error");
       }
       if (extraNames.length > MAX_PLAYERS) return this.toast(ws, `A scored game can have up to ${MAX_PLAYERS} players.`, "error");
-      const selectedNames = connectedPlayers.filter((p) => requestedIds.includes(p.id)).map((p) => normalize(p.name));
+      const selectedNames = connectedPlayers.filter((p) => requestedIds.includes(p.id) && p.id !== me.id).map((p) => normalize(p.name));
       const guestKeys = extraNames.map((name: string) => normalize(name));
-      if ([...selectedNames, ...guestKeys].some((name, i, all) => !name || all.indexOf(name) !== i)) {
+      if ([normalize(me.name), ...selectedNames, ...guestKeys].some((name, i, all) => !name || all.indexOf(name) !== i)) {
         return this.toast(ws, "Each assigned player must have a different name.", "error");
       }
-      if (!requestedIds.length && !extraNames.length) {
-        return this.toast(ws, "Select a lobby player or add a player name to keep score.", "error");
-      }
-      if (requestedIds.length + extraNames.length > MAX_PLAYERS) {
+      if (requestedIds.filter((id) => id !== me.id).length + extraNames.length + 1 > MAX_PLAYERS) {
         return this.toast(ws, `A scored game can have up to ${MAX_PLAYERS} players.`, "error");
       }
+      if (requestedIds.some((id) => id !== me.id) || extraNames.length > 0) playMode = "leader";
     }
 
     // Anyone who dropped out of the lobby doesn't get a seat.
@@ -700,7 +700,7 @@ export class Room extends DurableObject<Env> {
       } else if (playMode === "presented") {
         for (const p of this.s.players) p.active = p.id === me.id;
       } else {
-        for (const p of this.s.players) p.active = requestedIds.includes(p.id);
+        for (const p of this.s.players) p.active = p.id === me.id || requestedIds.includes(p.id);
         for (const name of extraNames) {
           this.s.players.push({
             id: `local-${crypto.randomUUID()}`,
