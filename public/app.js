@@ -947,6 +947,7 @@
       }
     }
     scoreSetupOpen = false;
+    $("#score-setup-modal").hidden = true;
     send(payload);
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });

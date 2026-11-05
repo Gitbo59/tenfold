@@ -164,6 +164,7 @@ $("#score-roster-details").open = true;
 click($("#local-score-players [data-remove-local-player]"));
 ok($("#score-setup-start").textContent === "Start solo game", "without additional players the start action is a no-score solo game");
 click($("#score-setup-start"));
+ok($("#score-setup-modal").hidden, "solo setup closes immediately when the game starts");
 ok(await until(() => visible("#screen-game") && !$("#play-mode-note").hidden), "the curated list can also be started in no-score audience mode");
 ok($("#turnbar").hidden && $("#players").hidden && !$("#play-mode-note").hidden, "audience mode is presented without turn or score UI");
 const livesAtStart = $$("#players .player").length;
