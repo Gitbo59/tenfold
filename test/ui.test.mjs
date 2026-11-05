@@ -166,6 +166,8 @@ ok($("#score-setup-start").textContent === "Start solo game", "without additiona
 click($("#score-setup-start"));
 ok($("#score-setup-modal").hidden, "solo setup closes immediately when the game starts");
 ok(await until(() => visible("#screen-game") && !$("#play-mode-note").hidden), "the curated list can also be started in no-score audience mode");
+ok($("#btn-hint").textContent === "Reveal hint" && !/vote/i.test($("#hint-note").textContent), "solo presentation offers a direct reveal-hint action without voting text");
+ok($("#guess").placeholder === "Take a guess", "solo guess input prompts the player to take a guess");
 ok($("#turnbar").hidden && $("#players").hidden && !$("#play-mode-note").hidden, "audience mode is presented without turn or score UI");
 const livesAtStart = $$("#players .player").length;
 submitGuess("Audience wrong guess");

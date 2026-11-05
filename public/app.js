@@ -507,10 +507,16 @@
     btn.disabled = s.hintsLeft <= 0;
     btn.setAttribute("aria-pressed", String(voted));
     const tally = `${s.hintVotes.length}/${s.hintVoters}`;
-    btn.textContent = s.hintsLeft <= 0 ? "No hints left" : voted ? `Voted for a hint (${tally})` : `Vote for a hint (${tally})`;
+    btn.textContent = s.hintsLeft <= 0
+      ? "No hints left"
+      : s.playMode === "presented"
+        ? "Reveal hint"
+        : voted ? `Voted for a hint (${tally})` : `Vote for a hint (${tally})`;
     $("#hint-note").textContent =
       s.hintsLeft > 0
-        ? `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left. One unlocks when everyone still playing votes.`
+        ? s.playMode === "presented"
+          ? `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left.`
+          : `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left. One unlocks when everyone still playing votes.`
         : "";
   }
 
@@ -619,7 +625,7 @@
     input.disabled = !canGuess;
     $("#btn-guess").disabled = !canGuess;
     $("#guess-form").dataset.state = canGuess ? "mine" : "wait";
-    input.placeholder = presented && !finished ? "Enter the audience's guess" : leaderControlled && !finished ? `Guess for ${cur ? cur.name : "the current player"}` : finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
+    input.placeholder = presented && !finished ? "Take a guess" : leaderControlled && !finished ? `Guess for ${cur ? cur.name : "the current player"}` : finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
     $("#guess-form").hidden = finished;
 
     // Results
