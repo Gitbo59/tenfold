@@ -138,6 +138,7 @@ $("#topic").value = "My custom category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Custom answer ${index + 1}`;
 click($("#btn-start"));
 ok(await until(() => !$("#score-setup-modal").hidden) && $('input[name="play-mode"][value="automatic"]').checked && !$("#score-roster").hidden, "after selecting a curated list, the leader can set up its score roster");
+ok($('input[name="play-mode"][value="network"]').closest(".play-option").hidden, "a one-device lobby does not show the device-to-device option");
 $("#score-player-name").value = "Local guest";
 $("#score-player-form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
 ok($$("#local-score-players li").length === 1 && $("#score-setup-start").textContent === "Start scored game", "adding a local player automatically enables scoring");

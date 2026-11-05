@@ -373,6 +373,7 @@
       input.disabled = !isHost || (input.value === "network" && connectedPlayers.length < 2);
     }
     $('input[name="play-mode"][value="automatic"]').closest(".play-option").hidden = multiplayerLobby;
+    $('input[name="play-mode"][value="network"]').closest(".play-option").hidden = !multiplayerLobby || customListMode;
     $("#score-roster").hidden = !isHost || playMode === "network" || multiplayerLobby;
     $("#auto-play-title").textContent = effectivePlayMode === "network"
       ? "Players take turns on their own devices"
