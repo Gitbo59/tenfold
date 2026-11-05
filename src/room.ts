@@ -627,7 +627,6 @@ export class Room extends DurableObject<Env> {
     }
 
     const connectedPlayers = this.s.players.filter((p) => this.isConnected(p.id));
-    if (hasManualList && playMode === "network") playMode = "presented";
     if (playMode === "network" && connectedPlayers.length < 2) playMode = "presented";
     const requestedIds = Array.isArray(msg.assignedIds) ? [...new Set(msg.assignedIds.filter((id: unknown) => typeof id === "string"))] as string[] : [];
     const extraNames = Array.isArray(msg.extraPlayers)

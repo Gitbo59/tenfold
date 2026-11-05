@@ -31,6 +31,7 @@ ok(await until(() => visible("#screen-lobby")), "lobby after creating a room");
 const code = $$("#room-code span").map((s) => s.textContent).join("");
 
 console.log("lobby controls");
+ok($("#score-setup-modal").hidden, "player setup stays closed until Start game is pressed");
 ok($$("#classics .chip").length === 6, "six built-in lists offered");
 ok($("#list-url").type === "url" && $("#prefer-latest-year").type === "checkbox" && $("#prefer-latest-year").closest(".settings"), "the latest-year preference sits with match settings");
 ok(/input\[type="url"\][\s\S]*?color:\s*var\(--chalk\)/.test(css) && /input\[type="url"\][\s\S]*?background:\s*var\(--stage-deep\)/.test(css), "the list URL input uses readable text on the dark input background");
@@ -63,11 +64,11 @@ $("#timer-on").checked = false; $("#timer-on").dispatchEvent(new w.Event("change
 ok(await until(() => bobState.config.timerEnabled === false), "time limit switched off (keeps the test deterministic)");
 
 console.log("built-in list round");
-click($('input[name="play-mode"][value="network"]'));
 const chip = $$("#classics .chip").find((c) => c.dataset.id === "mountains"); click(chip);
 ok($("#topic").value === "Highest mountains in the world" && chip.getAttribute("aria-pressed") === "true", "picking a built-in list fills the topic and marks it selected");
 click($("#btn-start"));
 ok(await until(() => !$("#score-setup-modal").hidden), "Start game opens player and scoring setup before list generation");
+ok($('input[name="play-mode"][value="automatic"]').closest(".play-option").hidden && $('input[name="play-mode"][value="network"]').checked, "multiple lobby devices default to turn-taking with no presentation option");
 click($("#score-setup-start"));
 ok(await until(() => visible("#screen-game")), "game starts from a built-in list (no AI)");
 ok($("#g-basis").textContent.includes("Height above sea level") && !$("#g-basis").textContent.includes("list)"), "basis shown, no difficulty label for built-ins");
@@ -129,6 +130,8 @@ click($("#btn-rematch"));
 ok(await until(() => visible("#screen-lobby")) && $$("#classics .chip").length === 6, "back in the lobby with built-in lists offered again");
 
 console.log("AI round with Hard difficulty");
+bobWs.close();
+ok(await until(() => $("#lobby-players .tag-away")), "the lobby updates when the other device disconnects");
 click($("#btn-custom-list"));
 ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer]").length === 10 && $("#topic-label").textContent === "Category / list title" && $(".topic-tools").hidden && $("#classics-wrap").hidden, "custom-list mode offers ten ranked answer fields");
 $("#topic").value = "My custom category";
@@ -140,7 +143,7 @@ $("#score-player-form").dispatchEvent(new w.Event("submit", { bubbles: true, can
 ok($$("#local-score-players li").length === 1 && $("#score-setup-start").textContent === "Start scored game", "adding a local player automatically enables scoring");
 click($("#score-setup-start"));
 ok(await until(() => visible("#screen-game"), 8000) && $("#g-title").textContent === "My custom category" && $("#g-basis").textContent.includes("Player-created list"), "the manual category starts as a player-created list");
-ok($$("#players .player").length === 3 && $$("#players .player").some((p) => p.textContent.includes("Local guest")), "connected and local players are included in the score roster");
+ok($$("#players .player").length === 2 && $$("#players .player").some((p) => p.textContent.includes("Local guest")), "the leader and locally added player are included in the score roster");
 const manualAnswers = Array.from({ length: 10 }, (_, i) => `Custom answer ${i + 1}`);
 for (let i = 0; i < manualAnswers.length; i++) {
   ok(await until(() => turnIsMine()), `leader can enter custom answer ${i + 1} for the current player`);
@@ -154,19 +157,14 @@ $("#topic").value = "Audience category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Audience answer ${index + 1}`;
 click($("#btn-start"));
 ok(await until(() => !$("#score-setup-modal").hidden), "player setup appears after pressing Start game");
-const bobScoreBox = $(`#score-player-list [data-score-player="${bobPid}"]`);
-if (bobScoreBox?.checked) {
-  bobScoreBox.checked = false;
-  bobScoreBox.dispatchEvent(new w.Event("change", { bubbles: true }));
-}
 click($("#local-score-players [data-remove-local-player]"));
 ok($("#score-setup-start").textContent === "Start presentation", "without additional players the start action has no scoring");
 click($("#score-setup-start"));
-ok(await until(() => visible("#screen-game") && bobState?.playMode === "presented"), "the curated list can also be started in no-score audience mode");
+ok(await until(() => visible("#screen-game") && !$("#play-mode-note").hidden), "the curated list can also be started in no-score audience mode");
 ok($("#turnbar").hidden && $("#players").hidden && !$("#play-mode-note").hidden, "audience mode is presented without turn or score UI");
-const livesAtStart = bobState.players.find((p) => p.id === w.sessionStorage.getItem("tf_pid")).lives;
+const livesAtStart = $$("#players .player").length;
 submitGuess("Audience wrong guess");
-ok(await until(() => bobState.wrong.includes("Audience wrong guess")) && bobState.players.find((p) => p.id === w.sessionStorage.getItem("tf_pid")).lives === livesAtStart, "audience wrong guesses do not cost lives");
+ok(await until(() => $$("#wrong .chip-x").some((chip) => chip.textContent === "Audience wrong guess")) && $$("#players .player").length === livesAtStart, "audience wrong guesses do not cost lives");
 for (let i = 0; i < 10; i++) {
   submitGuess(`Audience answer ${i + 1}`);
   ok(await until(() => $$("#board .plate.found").length >= i + 1 || visible("#results")), `audience finds answer ${i + 1}`);
@@ -175,13 +173,12 @@ ok(await until(() => visible("#results")) && $("#res-title").textContent.include
 click($("#btn-rematch"));
 ok(await until(() => visible("#screen-lobby")), "audience round can be rematched");
 click($("#btn-custom-list"));
-click($('input[name="play-mode"][value="network"]'));
 click($(".seg[data-diff=hard]"));
 click($("#topic-chips .chip"));
 click($("#btn-start"));
 ok(await until(() => !$("#score-setup-modal").hidden), "AI list enters player setup before generation");
 click($("#score-setup-start"));
-ok(await until(() => visible("#screen-game"), 8000), "AI list starts a game");
+ok(await until(() => visible("#screen-game") && !$("#play-mode-note").hidden, 8000), "AI list starts an audience presentation in a solo lobby");
 ok(/\(hard list\)/.test($("#g-basis").textContent), "header labels it a hard list: " + $("#g-basis").textContent);
 ok($("#source-line").hidden, "the source starts hidden again in the next game");
 click($("#btn-source"));

@@ -356,17 +356,24 @@
     const connectedPlayers = s.players.filter((p) => p.connected);
     const connectedIds = new Set(connectedPlayers.map((p) => p.id));
     assignedPlayerIds = new Set([...assignedPlayerIds].filter((id) => connectedIds.has(id)));
+    if (connectedPlayers.length > 1) playMode = "network";
+    else if (playMode === "network") playMode = "automatic";
     if (!scoreRosterEdited) assignedPlayerIds = new Set(connectedPlayers.filter((p) => p.id !== pid).map((p) => p.id));
     const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
-    const effectivePlayMode = playMode === "network" ? "network" : additionalPlayers > 0 ? "leader" : "presented";
+    const multiplayerLobby = connectedPlayers.length > 1;
+    const effectivePlayMode = multiplayerLobby
+      ? "network"
+      : additionalPlayers > 0 ? "leader" : "presented";
     $("#score-setup-modal").hidden = !scoreSetupOpen || !isHost;
     $("#score-setup-note").textContent = connectedPlayers.length === 1
       ? "Add players to keep score, or start now as a no-score audience game."
       : "Choose device-to-device turns or add players for the leader to keep score. You can also present this as a no-score audience game.";
     for (const input of $$('input[name="play-mode"]')) {
       input.checked = input.value === playMode;
-      input.disabled = !isHost || (input.value === "network" && (customListMode || connectedPlayers.length < 2));
+      input.disabled = !isHost || (input.value === "network" && connectedPlayers.length < 2);
     }
+    $('input[name="play-mode"][value="automatic"]').closest(".play-option").hidden = multiplayerLobby;
+    $("#score-roster").hidden = !isHost || playMode === "network" || multiplayerLobby;
     $("#auto-play-title").textContent = effectivePlayMode === "network"
       ? "Players take turns on their own devices"
       : effectivePlayMode === "presented" ? "Present the game to an audience" : "Leader enters guesses and keeps score";
@@ -378,7 +385,6 @@
     $("#score-setup-start").textContent = effectivePlayMode === "network"
       ? "Start multiplayer game"
       : effectivePlayMode === "leader" ? "Start scored game" : "Start presentation";
-    $("#score-roster").hidden = !isHost || playMode === "network";
     $("#score-player-list").innerHTML = s.players
       .filter((p) => p.connected)
       .map((p) => `<li><label><input type="checkbox" data-score-player="${esc(p.id)}"${assignedPlayerIds.has(p.id) ? " checked" : ""}${p.id === pid ? " disabled" : ""}> ${esc(p.name)}${p.id === pid ? " (leader, included automatically)" : ""}</label></li>`)
@@ -903,7 +909,7 @@
     }
 
     const connected = state?.players.filter((p) => p.connected) ?? [];
-    playMode = connected.length > 1 && !customListMode ? "network" : "automatic";
+    playMode = connected.length > 1 ? "network" : "automatic";
     scoreRosterEdited = false;
     assignedPlayerIds = new Set(connected.filter((p) => p.id !== pid).map((p) => p.id));
     scoreSetupOpen = true;
@@ -914,7 +920,7 @@
     const connected = state.players.filter((p) => p.connected);
     const additionalIds = [...assignedPlayerIds].filter((id) => id !== pid && connected.some((p) => p.id === id));
     const hasExtraPlayers = additionalIds.length > 0 || localScorePlayers.length > 0;
-    const selectedMode = playMode === "network" && connected.length > 1
+    const selectedMode = connected.length > 1
       ? "network"
       : hasExtraPlayers ? "leader" : "presented";
     const payload = {
