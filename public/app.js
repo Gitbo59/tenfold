@@ -365,16 +365,21 @@
       ? "network"
       : additionalPlayers > 0 ? "leader" : "presented";
     $("#score-setup-modal").hidden = !scoreSetupOpen || !isHost;
-    $("#score-setup-note").textContent = connectedPlayers.length === 1
-      ? "Add players to keep score, or start now as a no-score audience game."
-      : "Choose device-to-device turns or add players for the leader to keep score. You can also present this as a no-score audience game.";
+    const soloSetup = !multiplayerLobby;
+    $("#solo-setup").hidden = !soloSetup;
+    $("#score-setup-title").textContent = soloSetup ? "Ready to play solo?" : "Set up players";
+    $("#score-setup-note").textContent = soloSetup
+      ? "Your list is ready. Start playing now, or add players if you'd like to keep score."
+      : "Choose how everyone will take turns in this game.";
     for (const input of $$('input[name="play-mode"]')) {
       input.checked = input.value === playMode;
       input.disabled = !isHost || (input.value === "network" && connectedPlayers.length < 2);
     }
     $('input[name="play-mode"][value="automatic"]').closest(".play-option").hidden = multiplayerLobby;
     $('input[name="play-mode"][value="network"]').closest(".play-option").hidden = !multiplayerLobby || customListMode;
-    $("#score-roster").hidden = !isHost || playMode === "network" || multiplayerLobby;
+    $("#play-options").hidden = soloSetup;
+    $("#score-roster-details").hidden = !isHost || (multiplayerLobby && playMode === "network");
+    $("#score-roster").hidden = !isHost;
     $("#auto-play-title").textContent = effectivePlayMode === "network"
       ? "Players take turns on their own devices"
       : effectivePlayMode === "presented" ? "Present the game to an audience" : "Leader enters guesses and keeps score";
@@ -385,7 +390,7 @@
         : `Scoring is on for ${additionalPlayers + 1} players. The leader enters guesses for the current player.`;
     $("#score-setup-start").textContent = effectivePlayMode === "network"
       ? "Start multiplayer game"
-      : effectivePlayMode === "leader" ? "Start scored game" : "Start presentation";
+      : effectivePlayMode === "leader" ? "Start scored game" : "Start solo game";
     $("#score-player-list").innerHTML = s.players
       .filter((p) => p.connected)
       .map((p) => `<li><label><input type="checkbox" data-score-player="${esc(p.id)}"${assignedPlayerIds.has(p.id) ? " checked" : ""}${p.id === pid ? " disabled" : ""}> ${esc(p.name)}${p.id === pid ? " (leader, included automatically)" : ""}</label></li>`)

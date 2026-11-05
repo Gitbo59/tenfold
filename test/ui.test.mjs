@@ -137,8 +137,10 @@ ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer
 $("#topic").value = "My custom category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Custom answer ${index + 1}`;
 click($("#btn-start"));
-ok(await until(() => !$("#score-setup-modal").hidden) && $('input[name="play-mode"][value="automatic"]').checked && !$("#score-roster").hidden, "after selecting a curated list, the leader can set up its score roster");
+ok(await until(() => !$("#score-setup-modal").hidden) && !$("#solo-setup").hidden && $("#score-setup-title").textContent === "Ready to play solo?", "curated list setup is designed for solo play after pressing Start game");
 ok($('input[name="play-mode"][value="network"]').closest(".play-option").hidden, "a one-device lobby does not show the device-to-device option");
+ok($("#score-setup-start").textContent === "Start solo game" && !$("#score-roster-details").open, "solo play is the primary action and scoring setup is optional");
+$("#score-roster-details").open = true;
 $("#score-player-name").value = "Local guest";
 $("#score-player-form").dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
 ok($$("#local-score-players li").length === 1 && $("#score-setup-start").textContent === "Start scored game", "adding a local player automatically enables scoring");
@@ -158,15 +160,18 @@ $("#topic").value = "Audience category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Audience answer ${index + 1}`;
 click($("#btn-start"));
 ok(await until(() => !$("#score-setup-modal").hidden), "player setup appears after pressing Start game");
+$("#score-roster-details").open = true;
 click($("#local-score-players [data-remove-local-player]"));
-ok($("#score-setup-start").textContent === "Start presentation", "without additional players the start action has no scoring");
+ok($("#score-setup-start").textContent === "Start solo game", "without additional players the start action is a no-score solo game");
 click($("#score-setup-start"));
 ok(await until(() => visible("#screen-game") && !$("#play-mode-note").hidden), "the curated list can also be started in no-score audience mode");
 ok($("#turnbar").hidden && $("#players").hidden && !$("#play-mode-note").hidden, "audience mode is presented without turn or score UI");
 const livesAtStart = $$("#players .player").length;
 submitGuess("Audience wrong guess");
 ok(await until(() => $$("#wrong .chip-x").some((chip) => chip.textContent === "Audience wrong guess")) && $$("#players .player").length === livesAtStart, "audience wrong guesses do not cost lives");
+await sleep(1100);
 for (let i = 0; i < 10; i++) {
+  await sleep(120);
   submitGuess(`Audience answer ${i + 1}`);
   ok(await until(() => $$("#board .plate.found").length >= i + 1 || visible("#results")), `audience finds answer ${i + 1}`);
 }

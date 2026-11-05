@@ -502,6 +502,10 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="score-setup-title">
       <h2 id="score-setup-title" class="h2">Set up players</h2>
       <p id="score-setup-note" class="hint"></p>
+      <section id="solo-setup" class="solo-setup" hidden aria-labelledby="solo-setup-title">
+        <h3 id="solo-setup-title">Play solo</h3>
+        <p>Start a no-score game and see how many answers you can find. You can add players to keep score instead.</p>
+      </section>
       <fieldset id="play-options" class="play-options">
         <legend>How do you want to play?</legend>
         <label class="play-option">
@@ -512,6 +516,12 @@
           <input type="radio" name="play-mode" value="network">
           <span><strong>Players take turns on their own devices</strong><small>Everyone answers for themselves and earns points.</small></span>
         </label>
+      </fieldset>
+      <details id="score-roster-details" class="score-roster-details">
+        <summary>
+          <span>Add players for scoring <span class="optional">(optional)</span></span>
+          <small>Choose players in the lobby or add names for people sharing this device.</small>
+        </summary>
         <div id="score-roster" class="score-roster">
           <p class="hint">Add lobby players or people sharing this device. Scoring turns on automatically with more than one player.</p>
           <ul id="score-player-list" class="score-player-list"></ul>
@@ -521,7 +531,7 @@
           </form>
           <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
         </div>
-      </fieldset>
+      </details>
       <div class="modal-actions">
         <button id="score-setup-cancel" class="btn" type="button">Back</button>
         <button id="score-setup-start" class="btn btn-primary" type="button">Start presentation</button>
