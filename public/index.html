@@ -424,26 +424,6 @@
             <h3 class="h3">Built-in lists (no AI needed)</h3>
             <div id="classics" class="chips"></div>
           </div>
-          <fieldset id="play-options" class="play-options">
-            <legend>Players and scoring</legend>
-            <label class="play-option">
-              <input type="radio" name="play-mode" value="automatic" checked>
-              <span><strong id="auto-play-title">Present the game to an audience</strong><small id="auto-play-note">The leader enters guesses with no score. Add players below to turn scoring on.</small></span>
-            </label>
-            <label class="play-option">
-              <input type="radio" name="play-mode" value="network">
-              <span><strong>Players take turns on their own devices</strong><small>Everyone answers for themselves and earns points.</small></span>
-            </label>
-            <div id="score-roster" class="score-roster">
-              <p class="hint">The leader is included automatically when scoring is on. Select connected players or add names for people sharing this device.</p>
-              <ul id="score-player-list" class="score-player-list"></ul>
-              <form id="score-player-form" class="score-player-form" autocomplete="off">
-                <input id="score-player-name" maxlength="16" placeholder="Add a player name" aria-label="Local player name">
-                <button class="btn btn-small" type="submit">Add player</button>
-              </form>
-              <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
-            </div>
-          </fieldset>
           <p id="budget-note" class="hint budget-note"></p>
           <button id="btn-start" class="btn btn-primary btn-big" type="button">Build the list and start</button>
           <p id="wait-note" class="hint" hidden>Waiting for the leader to pick a topic. It stays secret until the game starts.</p>
@@ -517,6 +497,37 @@
       </form>
     </section>
   </main>
+
+  <div id="score-setup-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="score-setup-title">
+      <h2 id="score-setup-title" class="h2">Set up players</h2>
+      <p id="score-setup-note" class="hint"></p>
+      <fieldset id="play-options" class="play-options">
+        <legend>How do you want to play?</legend>
+        <label class="play-option">
+          <input type="radio" name="play-mode" value="automatic" checked>
+          <span><strong id="auto-play-title">Present the game to an audience</strong><small id="auto-play-note">With no extra players, guesses are shared and there is no score.</small></span>
+        </label>
+        <label class="play-option">
+          <input type="radio" name="play-mode" value="network">
+          <span><strong>Players take turns on their own devices</strong><small>Everyone answers for themselves and earns points.</small></span>
+        </label>
+        <div id="score-roster" class="score-roster">
+          <p class="hint">Add lobby players or people sharing this device. Scoring turns on automatically with more than one player.</p>
+          <ul id="score-player-list" class="score-player-list"></ul>
+          <form id="score-player-form" class="score-player-form" autocomplete="off">
+            <input id="score-player-name" maxlength="16" placeholder="Add a player name" aria-label="Local player name">
+            <button class="btn btn-small" type="submit">Add player</button>
+          </form>
+          <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
+        </div>
+      </fieldset>
+      <div class="modal-actions">
+        <button id="score-setup-cancel" class="btn" type="button">Back</button>
+        <button id="score-setup-start" class="btn btn-primary" type="button">Start presentation</button>
+      </div>
+    </div>
+  </div>
 
   <div id="report-modal" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="report-title">

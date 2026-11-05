@@ -40,6 +40,7 @@
   let assignedPlayerIds = new Set();
   let scoreRosterEdited = false;
   let localScorePlayers = [];
+  let scoreSetupOpen = false;
   const pool = () => (suggestionDifficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
   const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
 
@@ -205,6 +206,7 @@
     assignedPlayerIds = new Set();
     scoreRosterEdited = false;
     localScorePlayers = [];
+    scoreSetupOpen = false;
     state = null;
     retries = 0;
     sessionStorage.setItem("tf_room", c);
@@ -354,10 +356,13 @@
     const connectedPlayers = s.players.filter((p) => p.connected);
     const connectedIds = new Set(connectedPlayers.map((p) => p.id));
     assignedPlayerIds = new Set([...assignedPlayerIds].filter((id) => connectedIds.has(id)));
-    if (!scoreRosterEdited) assignedPlayerIds = new Set(connectedIds);
+    if (!scoreRosterEdited) assignedPlayerIds = new Set(connectedPlayers.filter((p) => p.id !== pid).map((p) => p.id));
     const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
     const effectivePlayMode = playMode === "network" ? "network" : additionalPlayers > 0 ? "leader" : "presented";
-    $("#play-options").hidden = !isHost;
+    $("#score-setup-modal").hidden = !scoreSetupOpen || !isHost;
+    $("#score-setup-note").textContent = connectedPlayers.length === 1
+      ? "Add players to keep score, or start now as a no-score audience game."
+      : "Choose device-to-device turns or add players for the leader to keep score. You can also present this as a no-score audience game.";
     for (const input of $$('input[name="play-mode"]')) {
       input.checked = input.value === playMode;
       input.disabled = !isHost || (input.value === "network" && (customListMode || connectedPlayers.length < 2));
@@ -370,6 +375,9 @@
       : effectivePlayMode === "presented"
         ? "No other players selected. The leader enters guesses with no score; add players below to turn scoring on."
         : `Scoring is on for ${additionalPlayers + 1} players. The leader enters guesses for the current player.`;
+    $("#score-setup-start").textContent = effectivePlayMode === "network"
+      ? "Start multiplayer game"
+      : effectivePlayMode === "leader" ? "Start scored game" : "Start presentation";
     $("#score-roster").hidden = !isHost || playMode === "network";
     $("#score-player-list").innerHTML = s.players
       .filter((p) => p.connected)
@@ -452,8 +460,7 @@
     $("#budget-note").hidden = !isHost;
     renderPlayOptions(s, isHost);
     $("#btn-start").hidden = !isHost;
-    const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
-    $("#btn-start").textContent = playMode !== "network" && additionalPlayers === 0 ? "Start presentation" : customListMode ? "Start custom list" : "Build the list and start";
+    $("#btn-start").textContent = "Start game";
     $("#wait-note").hidden = isHost;
     renderClassics(s.classics);
     $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
@@ -843,6 +850,7 @@
     scoreRosterEdited = true;
     if (checkbox.checked) assignedPlayerIds.add(checkbox.dataset.scorePlayer);
     else assignedPlayerIds.delete(checkbox.dataset.scorePlayer);
+    if (state) render();
   });
   $("#score-player-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -850,6 +858,7 @@
     const name = input.value.trim().slice(0, 16);
     if (!name) return input.focus();
     const rosterNames = [
+      ...(state?.players ?? []).filter((p) => p.id === pid).map((p) => p.name),
       ...[...(state?.players ?? [])].filter((p) => assignedPlayerIds.has(p.id)).map((p) => p.name),
       ...localScorePlayers,
     ];
@@ -874,6 +883,10 @@
     scoreRosterEdited = true;
     if (state) render();
   });
+  $("#score-setup-cancel").addEventListener("click", () => {
+    scoreSetupOpen = false;
+    if (state) render();
+  });
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
     if (customListMode) {
@@ -883,22 +896,46 @@
         toast("Enter all 10 answers in rank order.", "error");
         return $$("[data-manual-answer]").find((input) => !input.value.trim())?.focus();
       }
-      return send({
-        t: "start",
-        playMode,
-        ...(playMode === "automatic" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
-        manual: { title: topic, answers },
-      });
     }
-    const options = {
-      playMode,
-      ...(playMode === "automatic" ? { assignedIds: [...assignedPlayerIds], extraPlayers: localScorePlayers } : {}),
+    else if (!$("#list-url").value.trim() && !selectedClassic && topic.length < 3) {
+      toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error");
+      return $("#topic").focus();
+    }
+
+    const connected = state?.players.filter((p) => p.connected) ?? [];
+    playMode = connected.length > 1 && !customListMode ? "network" : "automatic";
+    scoreRosterEdited = false;
+    assignedPlayerIds = new Set(connected.filter((p) => p.id !== pid).map((p) => p.id));
+    scoreSetupOpen = true;
+    render();
+  });
+  $("#score-setup-start").addEventListener("click", () => {
+    if (!state) return;
+    const connected = state.players.filter((p) => p.connected);
+    const additionalIds = [...assignedPlayerIds].filter((id) => id !== pid && connected.some((p) => p.id === id));
+    const hasExtraPlayers = additionalIds.length > 0 || localScorePlayers.length > 0;
+    const selectedMode = playMode === "network" && connected.length > 1
+      ? "network"
+      : hasExtraPlayers ? "leader" : "presented";
+    const payload = {
+      t: "start",
+      playMode: selectedMode,
+      ...(selectedMode === "leader" ? { assignedIds: additionalIds, extraPlayers: localScorePlayers } : {}),
     };
-    const listUrl = $("#list-url").value.trim();
-    if (listUrl) return send({ t: "start", ...options, listUrl });
-    if (selectedClassic) return send({ t: "start", ...options, classic: selectedClassic });
-    if (topic.length < 3) { toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error"); return $("#topic").focus(); }
-    send({ t: "start", ...options, topic, ...(selectedSuggestionDifficulty ? { difficulty: selectedSuggestionDifficulty } : {}) });
+    if (customListMode) {
+      const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
+      payload.manual = { title: $("#topic").value.trim(), answers };
+    } else {
+      const listUrl = $("#list-url").value.trim();
+      if (listUrl) payload.listUrl = listUrl;
+      else if (selectedClassic) payload.classic = selectedClassic;
+      else {
+        payload.topic = $("#topic").value.trim();
+        if (selectedSuggestionDifficulty) payload.difficulty = selectedSuggestionDifficulty;
+      }
+    }
+    scoreSetupOpen = false;
+    send(payload);
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });
 
