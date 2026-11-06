@@ -224,7 +224,8 @@ input:disabled { opacity: 0.6; }
 .play-option input { margin-top: 4px; accent-color: var(--bulb); }
 .play-option span { display: grid; gap: 3px; }
 .play-option small { color: var(--muted); line-height: 1.4; }
-.solo-setup { margin: 0 0 16px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--stage-deep); text-align: center; }
+.solo-setup { width: 100%; margin: 0 0 16px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--stage-deep); color: var(--chalk); font: inherit; text-align: center; cursor: pointer; }
+.solo-setup:focus-visible { outline: 2px solid var(--bulb); outline-offset: 3px; }
 .solo-setup.selected { border-color: var(--bulb); background: linear-gradient(135deg, rgba(255, 213, 79, 0.13), var(--stage-deep)); }
 .solo-setup h3 { margin: 0; font: 800 1.55rem/1.1 var(--display); }
 .solo-setup p { max-width: 38ch; margin: 8px auto 0; color: var(--muted); line-height: 1.5; }

@@ -355,6 +355,7 @@
   function renderSoloSetupChoice() {
     const soloSelected = !$("#score-roster-details").open;
     $("#solo-setup").classList.toggle("selected", soloSelected);
+    $("#solo-setup").setAttribute("aria-pressed", String(soloSelected));
     $("#solo-setup-description").hidden = !soloSelected;
     $("#score-roster-details").classList.toggle("selected", !soloSelected);
   }
@@ -914,6 +915,15 @@
     if (state) render();
   });
   $("#score-roster-details").addEventListener("toggle", renderSoloSetupChoice);
+  $("#solo-setup").addEventListener("click", () => {
+    $("#score-roster-details").open = false;
+    renderSoloSetupChoice();
+  });
+  $("#solo-setup").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    $("#solo-setup").click();
+  });
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
     if (customListMode) {
