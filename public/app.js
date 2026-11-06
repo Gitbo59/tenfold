@@ -352,6 +352,13 @@
     ).join("");
   }
 
+  function renderSoloSetupChoice() {
+    const soloSelected = !$("#score-roster-details").open;
+    $("#solo-setup").classList.toggle("selected", soloSelected);
+    $("#solo-setup-description").hidden = !soloSelected;
+    $("#score-roster-details").classList.toggle("selected", !soloSelected);
+  }
+
   function renderPlayOptions(s, isHost) {
     const connectedPlayers = s.players.filter((p) => p.connected);
     const connectedIds = new Set(connectedPlayers.map((p) => p.id));
@@ -379,6 +386,7 @@
     $('input[name="play-mode"][value="network"]').closest(".play-option").hidden = !multiplayerLobby || customListMode;
     $("#play-options").hidden = soloSetup;
     $("#score-roster-details").hidden = !isHost || (multiplayerLobby && playMode === "network");
+    renderSoloSetupChoice();
     $("#score-roster").hidden = !isHost;
     $("#auto-play-title").textContent = effectivePlayMode === "network"
       ? "Players take turns on their own devices"
@@ -905,6 +913,7 @@
     scoreSetupOpen = false;
     if (state) render();
   });
+  $("#score-roster-details").addEventListener("toggle", renderSoloSetupChoice);
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
     if (customListMode) {
@@ -924,6 +933,7 @@
     playMode = connected.length > 1 ? "network" : "automatic";
     scoreRosterEdited = false;
     assignedPlayerIds = new Set(connected.filter((p) => p.id !== pid).map((p) => p.id));
+    $("#score-roster-details").open = false;
     scoreSetupOpen = true;
     render();
   });
