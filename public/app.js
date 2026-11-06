@@ -369,9 +369,10 @@
     if (!scoreRosterEdited) assignedPlayerIds = new Set(connectedPlayers.filter((p) => p.id !== pid).map((p) => p.id));
     const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
     const multiplayerLobby = connectedPlayers.length > 1;
+    const teammatesSelected = $("#score-roster-details").open;
     const effectivePlayMode = multiplayerLobby
       ? "network"
-      : additionalPlayers > 0 ? "leader" : "presented";
+      : teammatesSelected && additionalPlayers > 0 ? "leader" : "presented";
     $("#score-setup-modal").hidden = !scoreSetupOpen || !isHost;
     const soloSetup = !multiplayerLobby;
     $("#solo-setup").hidden = !soloSetup;
@@ -914,10 +915,14 @@
     scoreSetupOpen = false;
     if (state) render();
   });
-  $("#score-roster-details").addEventListener("toggle", renderSoloSetupChoice);
+  $("#score-roster-details").addEventListener("toggle", () => {
+    if (state) render();
+    else renderSoloSetupChoice();
+  });
   $("#solo-setup").addEventListener("click", () => {
     $("#score-roster-details").open = false;
-    renderSoloSetupChoice();
+    if (state) render();
+    else renderSoloSetupChoice();
   });
   $("#solo-setup").addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
@@ -951,7 +956,7 @@
     if (!state) return;
     const connected = state.players.filter((p) => p.connected);
     const additionalIds = [...assignedPlayerIds].filter((id) => id !== pid && connected.some((p) => p.id === id));
-    const hasExtraPlayers = additionalIds.length > 0 || localScorePlayers.length > 0;
+    const hasExtraPlayers = $("#score-roster-details").open && (additionalIds.length > 0 || localScorePlayers.length > 0);
     const selectedMode = connected.length > 1
       ? "network"
       : hasExtraPlayers ? "leader" : "presented";
