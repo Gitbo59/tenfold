@@ -34,6 +34,7 @@ interface AttemptRow {
   found: FoundEntry[];
   wrong: number;
   wrong_keys: string[];
+  streak: number;
   state: "playing" | "done";
   risk: number;
   flags: string[];
@@ -93,7 +94,7 @@ export class Arena extends DurableObject<Env> {
     sql.exec("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS daily_lists (date TEXT PRIMARY KEY, topic TEXT NOT NULL, difficulty TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ok', created INTEGER NOT NULL)");
     sql.exec(
-      "CREATE TABLE IF NOT EXISTS attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, account_id TEXT NOT NULL, started INTEGER NOT NULL, last_at INTEGER NOT NULL, lives INTEGER NOT NULL, score INTEGER NOT NULL DEFAULT 0, total_ms INTEGER NOT NULL DEFAULT 0, found TEXT NOT NULL DEFAULT '[]', wrong INTEGER NOT NULL DEFAULT 0, wrong_keys TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT 'playing', risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '[]', review TEXT NOT NULL DEFAULT 'none', ip TEXT NOT NULL DEFAULT '', UNIQUE (date, account_id))",
+      "CREATE TABLE IF NOT EXISTS attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, account_id TEXT NOT NULL, started INTEGER NOT NULL, last_at INTEGER NOT NULL, lives INTEGER NOT NULL, score INTEGER NOT NULL DEFAULT 0, total_ms INTEGER NOT NULL DEFAULT 0, found TEXT NOT NULL DEFAULT '[]', wrong INTEGER NOT NULL DEFAULT 0, wrong_keys TEXT NOT NULL DEFAULT '[]', streak INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'playing', risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '[]', review TEXT NOT NULL DEFAULT 'none', ip TEXT NOT NULL DEFAULT '', UNIQUE (date, account_id))",
     );
     sql.exec("CREATE TABLE IF NOT EXISTS guesses (attempt_id INTEGER NOT NULL, n INTEGER NOT NULL, ts INTEGER NOT NULL, ms INTEGER NOT NULL, kind TEXT NOT NULL, rank INTEGER, text TEXT, sig TEXT, flags TEXT)");
     // Lets us enforce "one attempt a day" even if someone deletes their account mid-day. Cleared at midnight UTC.
@@ -114,6 +115,7 @@ export class Arena extends DurableObject<Env> {
     try { sql.exec("ALTER TABLE accounts ADD COLUMN avatar TEXT"); } catch { /* already there */ }
     try { sql.exec("ALTER TABLE matches ADD COLUMN title TEXT"); } catch { /* already there */ }
     try { sql.exec("ALTER TABLE ranked_pool ADD COLUMN data_year INTEGER"); } catch { /* already there */ }
+    try { sql.exec("ALTER TABLE attempts ADD COLUMN streak INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
     sql.exec("CREATE INDEX IF NOT EXISTS matches_status ON matches (status, ts)");
     sql.exec("CREATE INDEX IF NOT EXISTS ranked_invites_sender ON ranked_invites (sender, status, expires)");
     sql.exec("CREATE INDEX IF NOT EXISTS ranked_invites_recipient ON ranked_invites (recipient, status, expires)");
@@ -154,6 +156,7 @@ export class Arena extends DurableObject<Env> {
       found: JSON.parse(String(r.found)),
       wrong: Number(r.wrong),
       wrong_keys: JSON.parse(String(r.wrong_keys)),
+      streak: Number(r.streak ?? 0),
       state: r.state === "done" ? "done" : "playing",
       risk: Number(r.risk),
       flags: JSON.parse(String(r.flags)),
@@ -164,8 +167,8 @@ export class Arena extends DurableObject<Env> {
 
   private saveAttempt(a: AttemptRow): void {
     this.q(
-      "UPDATE attempts SET last_at=?, lives=?, score=?, total_ms=?, found=?, wrong=?, wrong_keys=?, state=?, risk=?, flags=?, review=? WHERE id=?",
-      a.last_at, a.lives, a.score, a.total_ms, JSON.stringify(a.found), a.wrong, JSON.stringify(a.wrong_keys.slice(-40)),
+      "UPDATE attempts SET last_at=?, lives=?, score=?, total_ms=?, found=?, wrong=?, wrong_keys=?, streak=?, state=?, risk=?, flags=?, review=? WHERE id=?",
+      a.last_at, a.lives, a.score, a.total_ms, JSON.stringify(a.found), a.wrong, JSON.stringify(a.wrong_keys.slice(-40)), a.streak,
       a.state, a.risk, JSON.stringify(a.flags.slice(0, 12)), a.review, a.id,
     );
   }
@@ -627,12 +630,14 @@ export class Arena extends DurableObject<Env> {
 
     if (m.kind === "hit") {
       rank = m.index + 1;
-      const frac = Math.max(0, 1 - elapsed / turn);
-      const points = Math.round((11 - rank) * (1 + frac) * 10);
+      const speed = Math.round((3 * Math.max(0, turn - elapsed)) / turn);
+      const streak = Math.min(a.streak, 3);
+      const points = 11 - rank + speed + streak;
       a.found.push({ rank, points, ms: elapsed });
       a.score += points;
       a.total_ms += elapsed;
       a.last_at = now;
+      a.streak += 1;
       kind = "hit";
       result = { kind, rank, points, answer: answers[m.index].answer };
       const asm = assessGuess(sig, { correct: true, rank, elapsedMs: elapsed });
@@ -649,6 +654,7 @@ export class Arena extends DurableObject<Env> {
       a.lives -= 1;
       a.total_ms += elapsed;
       a.last_at = now;
+      a.streak = 0;
       kind = "miss";
       result = { kind, livesLeft: Math.max(0, a.lives) };
       const asm = assessGuess(sig, { correct: false, rank: 0, elapsedMs: elapsed });

@@ -88,9 +88,9 @@ ok(adm.exists && adm.attempts === 2 && adm.list.answers.length === 10, "owner ca
 
 console.log("playing and scoring");
 const g1 = await alice.guess("alpha");
-ok(g1.result.kind === "hit" && g1.result.rank === 1 && g1.result.points >= 150 && g1.result.points <= 200, "rank 1 is worth 100 to 200 depending on speed: " + g1.result.points);
+ok(g1.result.kind === "hit" && g1.result.rank === 1 && g1.result.points >= 10 && g1.result.points <= 13, "rank 1 is worth 10 to 13 depending on speed: " + g1.result.points);
 const g2 = await alice.guess("Hotel");
-ok(g2.result.rank === 8 && g2.result.points >= 30 && g2.result.points <= 60, "rank 8 is worth far less (30 to 60): " + g2.result.points);
+ok(g2.result.rank === 8 && g2.result.points >= 4 && g2.result.points <= 6, "rank 8 is worth far less (4 to 6) after the streak bonus: " + g2.result.points);
 ok(g1.result.points > g2.result.points, "higher-ranked answers score more");
 ok((await alice.guess("zzz")).result.livesLeft === 2, "a wrong answer costs a life");
 ok((await alice.guess("zzz")).result.kind === "repeat" && (await alice.guess("alpha")).result.kind === "dupe", "repeating a wrong or found answer is free");
