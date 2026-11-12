@@ -69,10 +69,9 @@ button, input { font: inherit; color: inherit; }
 .topbar-right .bmc-btn {
   display: inline-flex !important;
   align-items: center !important;
-  justify-content: center !important;
-  gap: 4px !important;
+  justify-content: space-between !important;
   box-sizing: border-box !important;
-  width: max-content !important;
+  width: 190px !important;
   min-width: 0 !important;
   height: 38px !important;
   padding: 0 14px !important;
@@ -95,6 +94,7 @@ button, input { font: inherit; color: inherit; }
 @media (max-width: 640px) {
   .topbar-game .topbar-right .bmc-btn {
     position: relative;
+    justify-content: center !important;
     width: 38px !important;
     min-width: 38px !important;
     max-width: 38px !important;
