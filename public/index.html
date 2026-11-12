@@ -62,7 +62,7 @@
 
     <!-- Daily challenge (competitive, solo) -->
     <section id="screen-daily" class="screen daily" hidden>
-      <a class="back-link" href="#/ranked" id="daily-back">Back to Ranked</a>
+      <a class="btn pl-back" href="#/ranked" id="daily-back" aria-label="Back to Ranked hub"><span class="pl-back-icon" aria-hidden="true">←</span><span>Ranked hub</span></a>
       <div class="daily-head">
         <h1 class="display daily-title">Daily challenge</h1>
         <p class="lede">One list a day, the same for everyone. Solo, ranked and scored on speed. A new list starts at 00:00 UTC.</p>
@@ -90,7 +90,7 @@
         <ul class="rules-list">
           <li>You get <strong>one attempt</strong> a day and three lives.</li>
           <li>Each answer has <strong id="rule-secs">30</strong> seconds. Run out and you lose a life, even if you close the tab.</li>
-          <li>The higher an answer sits in the list, the more it's worth (1st is worth 10, 10th is worth 1). Answering faster roughly doubles it.</li>
+          <li>Scoring follows the same rank-plus-speed-plus-streak formula as ranked rounds: the higher the rank and the faster you answer, the more points you get, and a miss resets your streak.</li>
           <li>We run automatic fair-play checks and may review top scores. <a href="/rules">Read the rules</a>.</li>
         </ul>
         <button id="daily-start" class="btn btn-primary btn-big" type="button">Start today's challenge</button>
