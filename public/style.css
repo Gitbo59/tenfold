@@ -99,6 +99,12 @@ button, input { font: inherit; color: inherit; }
   transform: translateY(-50%);
   justify-self: auto;
 }
+.topbar-game #btn-leave {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
 @media (max-width: 640px) {
   .topbar-game .topbar-right { right: 12px; }
   .topbar-game .topbar-right .bmc-btn {
