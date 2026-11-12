@@ -15,6 +15,7 @@ const quotaStub = (env: Env) => env.QUOTA.get(env.QUOTA.idFromName("global"));
 interface ArenaApi {
   signIn(idHash: string, provider: string): Promise<{ ok: true; token: string; name: string | null } | { ok: false; status: number; error: string }>;
   me(token: string | null): Promise<{ signedIn: boolean; name: string | null; avatar: string | null }>;
+  seedPreviewData(token: string | null): Promise<void>;
   setAvatar(token: string | null, color: unknown, icon: unknown): Promise<any>;
   rankedHistory(token: string | null, limit?: number): Promise<any>;
   signOut(token: string | null): Promise<void>;
@@ -46,6 +47,7 @@ interface ArenaApi {
   queueLeave(token: string | null): Promise<any>;
   rankedMe(token: string | null): Promise<any>;
   rankedLadder(token: string | null, limit?: number): Promise<any>;
+  rankedInvite(token: string | null, action: string, value: string, mode?: string): Promise<any>;
   adminMatches(limit?: number): Promise<any>;
   adminVoidMatch(id: string): Promise<any>;
   adminSetRating(name: string, rating: number): Promise<any>;
@@ -82,6 +84,11 @@ async function readJson(request: Request): Promise<any> {
 
 /** Arena methods return {ok:false,status,error} on failure; turn that into an HTTP response. */
 const reply = (r: any): Response => (r && r.ok === false ? json({ error: r.error }, r.status) : json(r));
+
+async function previewAccountId(): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tenfold:preview:dummy-account"));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 async function competitive(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
@@ -123,7 +130,29 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
   }
 
   // ---- account
-  if (path === "/api/me" && request.method === "GET") return json(await arena.me(token));
+  if (path === "/api/me" && request.method === "GET") {
+    const me = await arena.me(token);
+    if (env.PREVIEW_MODE !== "true") return json(me);
+    if (me.signedIn) {
+      await arena.seedPreviewData(token);
+      return json(me);
+    }
+
+    const signedIn = await arena.signIn(await previewAccountId(), "preview");
+    if (!signedIn.ok) return reply(signedIn);
+    if (!signedIn.name) {
+      const named = await arena.setName(signedIn.token, "Preview Player");
+      if (!named.ok) {
+        await arena.signOut(signedIn.token);
+        return reply(named);
+      }
+    }
+
+    await arena.seedPreviewData(signedIn.token);
+    const response = json(await arena.me(signedIn.token));
+    response.headers.append("Set-Cookie", cookie(url, SESSION_COOKIE, signedIn.token, 30 * 24 * 60 * 60));
+    return response;
+  }
   if (path === "/api/me/name" && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
     const body = await readJson(request);
@@ -201,6 +230,14 @@ async function competitive(request: Request, env: Env, url: URL): Promise<Respon
   if ((path === "/api/ranked/queue" || path === "/api/ranked/leave") && request.method === "POST") {
     if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
     return reply(path.endsWith("queue") ? await arena.queueJoin(token) : await arena.queueLeave(token));
+  }
+  const gameInvite = path.match(/^\/api\/ranked\/invites(?:\/(accept|decline|cancel))?$/);
+  if (gameInvite && request.method === "POST") {
+    if (!sameOrigin(request, url)) return json({ error: "Bad origin" }, 403);
+    const body = await readJson(request);
+    if (!body) return json({ error: "Bad request" }, 400);
+    const action = gameInvite[1] ?? "send";
+    return reply(await arena.rankedInvite(token, action, String(action === "send" ? body.name ?? "" : body.id ?? ""), String(body.mode ?? "")));
   }
 
   // ---- owner only

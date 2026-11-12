@@ -68,7 +68,8 @@ ok(await ui.until(() => /Nobody has a rating yet/.test(ui.$("#rk-ladder-body").t
 ok(ui.$("#mode-pill a[aria-current=page]").dataset.mode === "ranked", "the pill shows Ranked");
 
 console.log("the hub links to the profile screen; account buttons moved there");
-ok(ui.$("#rk-name").getAttribute("href") === "#/me" && ui.$("#rk-edit-profile").getAttribute("href") === "#/me" && ui.$(".profile-link[aria-label]").getAttribute("href") === "#/me", "your picture, name and an 'edit profile' button all open your profile");
+ok(ui.$("#rk-name").getAttribute("href") === "#/me" && ui.$("#rk-edit-profile").getAttribute("href") === "#/me" && ui.$(".profile-link[aria-label]").getAttribute("href") === "#/me", "your picture, name and the pencil icon all open your profile");
+ok(ui.$("#rk-edit-profile").getAttribute("aria-label") === "Edit your profile" && !!ui.$("#rk-edit-profile svg"), "the small pencil icon is accessible and appears beside your name");
 ok(!ui.$("#rk-signout") && !ui.$("#rk-delete") && !ui.$("#rk-edit-avatar") && !ui.$("#ranked-account"), "sign out, delete and the picture editor are no longer on the hub");
 ok(!!ui.$("#fr-add-form") && /No friends yet/.test(ui.$("#fr-list").textContent), "the hub has a Friends card (empty to start with)");
 
@@ -103,14 +104,15 @@ console.log("result, then the profile updates");
 oppWs.send(JSON.stringify({ t: "resign" }));
 ok(await ui.until(() => !ui.$("#results").hidden && /You won/.test(ui.$("#res-title").textContent)), "when the opponent resigns, I see 'You won'");
 ok(await ui.until(() => /Rating 1200 → 1220 \(\+20\)/.test(ui.$("#res-rating").textContent)), "with the rating change: " + ui.$("#res-rating").textContent);
-ok(!ui.$("#btn-ranked-back").hidden && ui.$("#btn-rematch").hidden, "'Back to Ranked' is offered; no rematch");
+ok(!ui.$("#btn-ranked-back").hidden && ui.$("#btn-rematch").hidden && ui.$("#btn-ranked-back").classList.contains("pl-back") && !!ui.$("#btn-ranked-back .pl-back-icon"), "the styled Ranked hub button is offered; no rematch");
 ui.click(ui.$("#btn-ranked-back"));
 ok(await ui.until(() => !ui.$("#screen-ranked").hidden && ui.$("#rk-rating").textContent === "1220" && !ui.$("#mode-pill").hidden), "back on the hub my rating is 1220 and the pill is back");
 const stats = Object.fromEntries(ui.$$("#rk-stats .stat").map((s) => [s.querySelector(".stat-l").textContent, s.querySelector(".stat-n").textContent]));
 ok(stats["Peak rating"] === "1220" && stats["Game"] === "1" && stats["Win rate"] === "100%" && stats["Won-lost-drawn"] === "1-0-0" && stats["Current streak"] === "1 W", "stats update: " + JSON.stringify(stats));
-ok(/#1 on the ladder/.test(ui.$("#rk-sub").textContent) && !!ui.$("#rk-trend polyline"), "my ladder position and a rating trend line appear");
+ok(/#1 on the ladder/.test(ui.$("#rk-sub").textContent) && !!ui.$("#rk-trend polyline") && !!ui.$("#rk-trend .chart-grid") && !!ui.$("#rk-trend .chart-point.current"), "my ladder position and detailed rating trend appear");
 const row = ui.$("#rk-recent .recent-row");
-ok(!!row && /Opp/.test(row.textContent) && row.querySelector(".badge.win") && /\+20/.test(row.querySelector(".delta").textContent) && /now 1220/.test(row.textContent) && !!row.querySelector("svg.av"), "recent games: opponent, avatar, WIN, +20, rating after: " + (row && row.textContent.replace(/\s+/g, " ").slice(0, 100)));
+ok(!!row && /Opp/.test(row.textContent) && row.querySelector(".badge.win") && /\+20/.test(row.querySelector(".delta").textContent) && /now 1220/.test(row.querySelector(".meta").textContent) && row.querySelector(".meta").nextElementSibling.classList.contains("recent-time") && !row.querySelector(".meta").textContent.includes("ago") && !!row.querySelector("svg.av"), "recent games show category, rating change, rating after, and a separate time element");
+ok(row.querySelector(".badge").textContent === "WIN" && row.querySelector(".badge").classList.contains("badge"), "the result uses the shared fixed-size WIN/LOSS/DRAW badge style");
 const rows = ui.$$("#rk-ladder-body tbody tr");
 ok(rows.length === 2 && /UiRanked/.test(rows[0].textContent) && /1220/.test(rows[0].textContent) && /Opp/.test(rows[1].textContent) && /1180/.test(rows[1].textContent) && rows.every((r) => r.querySelector("svg.av")) && /\(you\)/.test(rows[0].textContent), "the ladder lists both with avatars, best first, and marks me");
 oppWs.close();

@@ -9,6 +9,7 @@
   let deadline = 0; // local time when the current answer runs out
   let tab = "today";
   let refreshing = false;
+  let ticker = null;
 
   // ------------------------------------------------------------------ talking to the server
   async function api(path, body) {
@@ -58,7 +59,11 @@
   });
   window.addEventListener("blur", away);
   window.addEventListener("focus", back);
-  document.addEventListener("visibilitychange", () => (document.hidden ? away() : back()));
+  document.addEventListener("visibilitychange", () => {
+    document.hidden ? away() : back();
+    updateTicker();
+  });
+  window.addEventListener("tf:screen", updateTicker);
 
   // ------------------------------------------------------------------ screens
   function panels(show) {
@@ -129,6 +134,7 @@
       panels(["daily-ready", "daily-board", "daily-account"]);
       loadBoard();
     }
+    updateTicker();
   }
 
   // ------------------------------------------------------------------ playing
@@ -169,10 +175,19 @@
       setTimeout(async () => { await loadState(); refreshing = false; }, 400);
     }
   }
-  setInterval(tick, 100);
+  function updateTicker() {
+    const active = signedIn && !document.hidden && !$("#screen-daily").hidden && state?.status === "playing";
+    if (active && !ticker) {
+      tick();
+      ticker = setInterval(tick, 100);
+    } else if (!active && ticker) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  }
 
   const result = {
-    hit: (r) => toast(`+${r.points} for ${r.answer}`),
+    hit: (r) => { T.playCorrectSound(); toast(`+${r.points} for ${r.answer}`); },
     miss: (r) => toast(r.livesLeft > 0 ? `Not on the list. ${r.livesLeft} ${r.livesLeft === 1 ? "life" : "lives"} left.` : "Not on the list. That was your last life.", "error"),
     dupe: (r) => toast(`${r.answer} is already on the board.`),
     repeat: () => toast("You already tried that one. No life lost."),
@@ -182,6 +197,7 @@
     e.preventDefault();
     const text = input.value.trim();
     if (!text || !state || state.status !== "playing") return;
+    T.prepareCorrectSound();
     const signals = collectSignals();
     input.value = "";
     $("#daily-guess-btn").disabled = true;

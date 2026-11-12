@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { AiError, generateTopTen, type Difficulty, type TopTen } from "./ai";
 import { REVIEW_THRESHOLD, assessAttempt, assessGuess, cleanSignals } from "./anticheat";
 import { DAILY_TOPICS, dailyTopic } from "./daily-topics";
-import { CLASSICS, getClassic } from "./classics";
+import { CLASSICS } from "./classics";
 import { START_RATING, PROVISIONAL_GAMES, ratingChange } from "./elo";
 import { matchGuess, normalize, type Answer } from "./match";
 import type { Env } from "./types";
@@ -61,6 +61,10 @@ const randomToken = (): string => {
 };
 
 const isoDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+const dataYear = (topic: string, list: TopTen): number => {
+  const years = `${topic} ${list.title} ${list.basis}`.match(/\b(?:19|20)\d{2}\b/g)?.map(Number) ?? [];
+  return Math.max(0, ...years.filter((year) => year <= new Date().getUTCFullYear()));
+};
 
 /**
  * Accounts, sessions, the daily challenge and its leaderboards. Accounts hold no email and no
@@ -76,9 +80,11 @@ interface QueueEntry {
 
 export class Arena extends DurableObject<Env> {
   private queue = new Map<string, QueueEntry>();
+  private reservedPlayers = new Set<string>();
   private pairing = false;
   private generating = new Map<string, Promise<TopTen>>();
   private rate = new Map<string, { t: number; n: number }>();
+  private lastActiveSweep = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -94,8 +100,10 @@ export class Arena extends DurableObject<Env> {
     sql.exec("CREATE TABLE IF NOT EXISTS tombstones (date TEXT NOT NULL, account_id TEXT NOT NULL, PRIMARY KEY (date, account_id))");
     sql.exec("CREATE TABLE IF NOT EXISTS ratings (account_id TEXT PRIMARY KEY, rating INTEGER NOT NULL, games INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0, peak INTEGER NOT NULL, recent TEXT NOT NULL DEFAULT '[]', updated INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS matches (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, code TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, list_key TEXT NOT NULL, status TEXT NOT NULL, a_before INTEGER, b_before INTEGER, a_delta INTEGER, b_delta INTEGER, outcome TEXT, reason TEXT, a_risk INTEGER NOT NULL DEFAULT 0, b_risk INTEGER NOT NULL DEFAULT 0, flags TEXT NOT NULL DEFAULT '{}')");
-    sql.exec("CREATE TABLE IF NOT EXISTS ranked_pool (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, payload TEXT NOT NULL, created INTEGER NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS ranked_pool (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, payload TEXT NOT NULL, created INTEGER NOT NULL, data_year INTEGER)");
+    sql.exec("CREATE TABLE IF NOT EXISTS ranked_invites (id TEXT PRIMARY KEY, sender TEXT NOT NULL, recipient TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL, code TEXT, match_id TEXT, created INTEGER NOT NULL, expires INTEGER NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS identities (id_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, provider TEXT NOT NULL, linked INTEGER NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS preview_seed (account_id TEXT PRIMARY KEY, created INTEGER NOT NULL)");
     sql.exec("CREATE INDEX IF NOT EXISTS identities_account ON identities (account_id)");
     sql.exec("CREATE TABLE IF NOT EXISTS friendships (lo TEXT NOT NULL, hi TEXT NOT NULL, status TEXT NOT NULL, requested_by TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (lo, hi))");
     sql.exec("CREATE INDEX IF NOT EXISTS friendships_hi ON friendships (hi)");
@@ -105,8 +113,12 @@ export class Arena extends DurableObject<Env> {
     try { sql.exec("ALTER TABLE accounts ADD COLUMN profile_public INTEGER NOT NULL DEFAULT 1"); } catch { /* already there */ }
     try { sql.exec("ALTER TABLE accounts ADD COLUMN avatar TEXT"); } catch { /* already there */ }
     try { sql.exec("ALTER TABLE matches ADD COLUMN title TEXT"); } catch { /* already there */ }
+    try { sql.exec("ALTER TABLE ranked_pool ADD COLUMN data_year INTEGER"); } catch { /* already there */ }
     sql.exec("CREATE INDEX IF NOT EXISTS matches_status ON matches (status, ts)");
+    sql.exec("CREATE INDEX IF NOT EXISTS ranked_invites_sender ON ranked_invites (sender, status, expires)");
+    sql.exec("CREATE INDEX IF NOT EXISTS ranked_invites_recipient ON ranked_invites (recipient, status, expires)");
     sql.exec("CREATE INDEX IF NOT EXISTS attempts_date ON attempts (date, state)");
+    sql.exec("CREATE INDEX IF NOT EXISTS attempts_state_date ON attempts (state, date)");
     sql.exec("CREATE INDEX IF NOT EXISTS guesses_attempt ON guesses (attempt_id)");
   }
 
@@ -211,6 +223,115 @@ export class Arena extends DurableObject<Env> {
     return { ok: true, token, name: found.length && found[0].name !== null ? String(found[0].name) : null };
   }
 
+  async seedPreviewData(token: string | null): Promise<void> {
+    const preview = await this.account(token);
+    if (!preview) return;
+    const identity = this.q("SELECT 1 FROM identities WHERE account_id = ? AND id_hash = ? AND provider = 'preview'", preview.id, preview.id);
+    if (!identity.length || this.q("SELECT 1 FROM preview_seed WHERE account_id = ?", preview.id).length) return;
+
+    const names = ["Avery Demo", "Blake Demo", "Casey Demo", "Drew Demo", "Emery Demo", "Finley Demo", "Gray Demo", "Harper Demo", "Indigo Demo", "Jules Demo"];
+    const ids = await Promise.all(names.map((name) => sha256hex(`tenfold:preview:account:${name}`)));
+    const now = Date.now();
+    const byName = new Map(names.map((name, i) => [name, ids[i]]));
+
+    for (let i = 0; i < names.length; i++) {
+      this.q("INSERT OR IGNORE INTO accounts (id, name, banned, created, last_seen) VALUES (?, ?, 0, ?, ?)", ids[i], names[i], now - 90 * 86_400_000, now);
+    }
+
+    const fixtures = [
+      { result: "a", opponent: 1260, title: "Highest mountains in the world" },
+      { result: "b", opponent: 1340, title: "Largest islands in the world" },
+      { result: "a", opponent: 1410, title: "Largest US states by total area" },
+      { result: "a", opponent: 1480, title: "Largest lakes in the world" },
+      { result: "draw", opponent: 1530, title: "Largest countries in Africa by area" },
+      { result: "b", opponent: 1600, title: "Largest countries in South America by area" },
+      { result: "a", opponent: 1670, title: "Highest mountains in the world" },
+      { result: "a", opponent: 1740, title: "Largest islands in the world" },
+    ] as const;
+    let rating = START_RATING;
+    let games = 0, wins = 0, losses = 0, draws = 0, peak = START_RATING;
+    const recent: string[] = [];
+    for (let i = 0; i < fixtures.length; i++) {
+      const fixture = fixtures[i];
+      const opponentId = ids[i];
+      const scoreA = fixture.result === "a" ? 1 : fixture.result === "b" ? 0 : 0.5;
+      const opponentGames = 18;
+      const { aDelta, bDelta } = ratingChange({ rating, games }, { rating: fixture.opponent, games: opponentGames }, scoreA);
+      const nextRating = rating + aDelta;
+      const ts = now - (fixtures.length - i) * 2 * 86_400_000;
+      const listKey = `classic:${CLASSICS[i % CLASSICS.length].id}`;
+      const matchId = `preview-${preview.id.slice(0, 12)}-${i + 1}`;
+      this.q(
+        "INSERT OR REPLACE INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before, a_delta, b_delta, outcome, reason, a_risk, b_risk, flags, title) VALUES (?, ?, ?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, 'completed', 0, 0, '{}', ?)",
+        matchId, ts, `D${String(i + 1).padStart(4, "0")}`, preview.id, opponentId, listKey, rating, fixture.opponent, aDelta, bDelta, fixture.result, fixture.title,
+      );
+      const botRating = fixture.opponent + bDelta;
+      this.q(
+        "INSERT INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, 18, 10, 7, 1, ?, '[]', ?) ON CONFLICT(account_id) DO UPDATE SET rating=excluded.rating, games=excluded.games, wins=excluded.wins, losses=excluded.losses, draws=excluded.draws, peak=excluded.peak, updated=excluded.updated",
+        opponentId, botRating, Math.max(fixture.opponent + 120, botRating), now,
+      );
+      if (fixture.result === "a") wins++;
+      else if (fixture.result === "b") losses++;
+      else draws++;
+      games++;
+      rating = nextRating;
+      peak = Math.max(peak, rating);
+      recent.push(listKey);
+    }
+    this.q(
+      "INSERT INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET rating=excluded.rating, games=excluded.games, wins=excluded.wins, losses=excluded.losses, draws=excluded.draws, peak=excluded.peak, recent=excluded.recent, updated=excluded.updated",
+      preview.id, rating, games, wins, losses, draws, peak, JSON.stringify(recent.slice(-10)), now,
+    );
+    for (let i = 8; i < names.length; i++) {
+      const extraRating = i === 8 ? 1840 : 1785;
+      this.q(
+        "INSERT INTO ratings (account_id, rating, games, wins, losses, draws, peak, recent, updated) VALUES (?, ?, 26, 17, 7, 2, ?, '[]', ?) ON CONFLICT(account_id) DO UPDATE SET rating=excluded.rating, games=excluded.games, wins=excluded.wins, losses=excluded.losses, draws=excluded.draws, peak=excluded.peak, updated=excluded.updated",
+        ids[i], extraRating, extraRating + 145, now,
+      );
+    }
+
+    const addFriend = (name: string, status: "accepted" | "pending", requestedBy: string) => {
+      const id = byName.get(name)!;
+      const [lo, hi] = preview.id < id ? [preview.id, id] : [id, preview.id];
+      this.q("INSERT OR IGNORE INTO friendships (lo, hi, status, requested_by, created) VALUES (?, ?, ?, ?, ?)", lo, hi, status, requestedBy, now - 12 * 86_400_000);
+    };
+    for (const name of names.slice(0, 5)) addFriend(name, "accepted", preview.id);
+    addFriend(names[5], "pending", ids[5]);
+    addFriend(names[6], "pending", preview.id);
+
+    const today = new Date();
+    const monthStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1);
+    const offsets = [0, 1, 3, 6, 10, 16, 23];
+    const dailyList = JSON.stringify({
+      title: "Preview daily challenge",
+      basis: "Synthetic preview leaderboard fixture",
+      source: "",
+      answers: Array.from({ length: 10 }, (_, i) => ({ answer: `Demo answer ${i + 1}`, aliases: [] })),
+    });
+    const addAttempt = (accountId: string, date: string, score: number, salt: number) => {
+      const ts = Date.parse(`${date}T12:00:00.000Z`) + salt * 1000;
+      const found = Array.from({ length: 10 }, (_, i) => ({ rank: i + 1, points: Math.max(1, Math.round(score / 10)), ms: 5000 + i * 250 }));
+      this.q(
+        "INSERT OR IGNORE INTO attempts (date, account_id, started, last_at, lives, score, total_ms, found, wrong, wrong_keys, state, risk, flags, review, ip) VALUES (?, ?, ?, ?, 0, ?, ?, ?, 0, '[]', 'done', 0, '[]', 'none', 'preview')",
+        date, accountId, ts, ts + 30_000, score, 30_000, JSON.stringify(found),
+      );
+    };
+    for (const offset of offsets) {
+      const stamp = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - offset));
+      const date = isoDay(stamp.getTime());
+      if (offset > 0 && stamp.getTime() >= monthStart) {
+        this.q("INSERT OR IGNORE INTO daily_lists (date, topic, difficulty, payload, status, created) VALUES (?, 'Preview daily challenge', 'easy', ?, 'ok', ?)", date, dailyList, now);
+      }
+      if (offset === 0) {
+        for (let i = 0; i < 6; i++) addAttempt(ids[i], date, 710 + ((i * 97) % 280), i);
+      } else if (stamp.getTime() >= monthStart) {
+        for (let i = 0; i < names.length; i++) addAttempt(ids[i], date, 620 + ((i * 83 + offset * 17) % 420), i + offset);
+        if ([1, 3, 6].includes(offset)) addAttempt(preview.id, date, 780 + offset * 9, 20 + offset);
+      }
+    }
+    this.q("INSERT OR IGNORE INTO preview_seed (account_id, created) VALUES (?, ?)", preview.id, now);
+  }
+
   /** Accounts that predate linking get a placeholder row so they show (and can unlink) correctly. */
   private ensureIdentity(accountId: string): void {
     if (!this.q("SELECT 1 FROM identities WHERE account_id = ?", accountId).length) {
@@ -301,7 +422,9 @@ export class Arena extends DurableObject<Env> {
     this.q("DELETE FROM ratings WHERE account_id = ?", a.id);
     this.q("DELETE FROM identities WHERE account_id = ?", a.id);
     this.q("DELETE FROM friendships WHERE lo = ? OR hi = ?", a.id, a.id);
+    this.q("DELETE FROM ranked_invites WHERE sender = ? OR recipient = ?", a.id, a.id);
     this.q("DELETE FROM matches WHERE a = ? OR b = ?", a.id, a.id);
+    this.q("DELETE FROM preview_seed WHERE account_id = ?", a.id);
     this.q("DELETE FROM accounts WHERE id = ?", a.id);
     return { ok: true };
   }
@@ -357,6 +480,7 @@ export class Arena extends DurableObject<Env> {
     for (let i = 0; i < 3; i++) await this.ensureList(isoDay(start + i * 86_400_000));
     this.q("DELETE FROM sessions WHERE expires < ?", start);
     this.q("DELETE FROM tombstones WHERE date < ?", isoDay(start));
+    this.q("DELETE FROM ranked_invites WHERE expires < ?", start - 30 * 86_400_000);
     this.expireActive();
     await this.topUpPool(2);
     this.q("DELETE FROM guesses WHERE ts < ?", start - 60 * 86_400_000);
@@ -553,8 +677,8 @@ export class Arena extends DurableObject<Env> {
     let rows: any[];
     if (month) {
       rows = this.q(
-        `SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, SUM(a.score) AS score, COUNT(*) AS days, SUM(a.total_ms) AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id JOIN daily_lists d ON d.date = a.date AND d.status = 'ok' WHERE substr(a.date, 1, 7) = ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 GROUP BY acc.id ORDER BY score DESC, ms ASC LIMIT 300`,
-        month, viewer ?? "",
+        `SELECT acc.id AS id, acc.name AS name, acc.avatar AS avatar, SUM(a.score) AS score, COUNT(*) AS days, SUM(a.total_ms) AS ms FROM attempts a JOIN accounts acc ON acc.id = a.account_id JOIN daily_lists d ON d.date = a.date AND d.status = 'ok' WHERE a.date >= ? AND a.date < ? AND a.state = 'done' AND ${visible} AND acc.banned = 0 GROUP BY acc.id ORDER BY score DESC, ms ASC LIMIT 300`,
+        `${month}-01`, new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)).toISOString().slice(0, 10), viewer ?? "",
       );
     } else {
       rows = this.q(
@@ -617,7 +741,11 @@ export class Arena extends DurableObject<Env> {
   }
 
   private expireActive(): void {
-    this.q("UPDATE matches SET status = 'aborted', reason = 'expired' WHERE status = 'active' AND ts < ?", Date.now() - 3 * 60 * 60 * 1000);
+    const now = Date.now();
+    if (now - this.lastActiveSweep < 60_000) return;
+    this.q("UPDATE matches SET status = 'aborted', reason = 'expired' WHERE status = 'active' AND ts < ?", now - 3 * 60 * 60 * 1000);
+    this.q("UPDATE ranked_invites SET status = 'completed' WHERE match_id IN (SELECT id FROM matches WHERE status = 'aborted') AND status = 'accepted'");
+    this.lastActiveSweep = now;
   }
 
   private activeMatch(id: string) {
@@ -647,6 +775,7 @@ export class Arena extends DurableObject<Env> {
     if (!acc) return fail(401, "Sign in first.");
     if (!acc.name) return fail(400, "Choose a username first.");
     if (acc.banned) return fail(403, "This account can't play.");
+    if (this.reservedPlayers.has(acc.id)) return fail(409, "Your friend game is being created. Try again in a moment.");
     if (!this.activeMatch(acc.id)) {
       const r = this.ratingRow(acc.id);
       const now = Date.now();
@@ -672,9 +801,30 @@ export class Arena extends DurableObject<Env> {
     return { ok: true, ...this.statusFor(acc.id) };
   }
 
-  private playedRecently(a: string, b: string): boolean {
-    const n = Number(this.q("SELECT COUNT(*) AS n FROM matches WHERE status = 'done' AND ts > ? AND ((a = ? AND b = ?) OR (a = ? AND b = ?))", Date.now() - 24 * 3600_000, a, b, b, a)[0].n);
-    return n >= 2; // stops two accounts trading wins to pump a rating
+  private recentPairs(ids: string[]): Set<string> {
+    const waiting = new Set(ids);
+    const matches = new Set<string>();
+    const counts = new Map<string, number>();
+    const cutoff = Date.now() - 24 * 3600_000;
+    for (let offset = 0; offset < ids.length; offset += 400) {
+      const batch = ids.slice(offset, offset + 400);
+      const marks = batch.map(() => "?").join(", ");
+      const rows = this.q(
+        `SELECT id, a, b FROM matches WHERE status = 'done' AND ts > ? AND (a IN (${marks}) OR b IN (${marks}))`,
+        cutoff, ...batch, ...batch,
+      );
+      for (const row of rows) {
+        const id = String(row.id);
+        if (matches.has(id)) continue;
+        matches.add(id);
+        const a = String(row.a), b = String(row.b);
+        if (waiting.has(a) && waiting.has(b)) {
+          const pair = a < b ? `${a}:${b}` : `${b}:${a}`;
+          counts.set(pair, (counts.get(pair) ?? 0) + 1);
+        }
+      }
+    }
+    return new Set([...counts].filter(([, count]) => count >= 2).map(([pair]) => pair)); // Keep the two-games-per-day limit.
   }
 
   private async tryPair(): Promise<void> {
@@ -684,6 +834,7 @@ export class Arena extends DurableObject<Env> {
       const now = Date.now();
       for (const e of [...this.queue.values()]) if (now - e.lastPoll > 15_000 || now - e.since > 5 * 60_000) this.queue.delete(e.id);
       const waiting = [...this.queue.values()].sort((x, y) => x.since - y.since);
+      const recentPairs = this.recentPairs(waiting.map((e) => e.id));
       const used = new Set<string>();
       for (const a of waiting) {
         if (used.has(a.id)) continue;
@@ -692,7 +843,8 @@ export class Arena extends DurableObject<Env> {
           if (b.id === a.id || used.has(b.id)) continue;
           const gap = Math.abs(a.rating - b.rating);
           if (gap > Math.max(this.window(a, now), this.window(b, now))) continue;
-          if (this.playedRecently(a.id, b.id)) continue;
+          const pair = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+          if (recentPairs.has(pair)) continue;
           if (!best || gap < Math.abs(a.rating - best.rating)) best = b;
         }
         if (!best) continue;
@@ -705,58 +857,61 @@ export class Arena extends DurableObject<Env> {
     }
   }
 
-  private loadKey(key: string): TopTen | null {
-    if (key.startsWith("classic:")) {
-      const c = getClassic(key.slice(8));
-      return c ? { title: c.title, basis: c.basis, source: c.source, answers: c.answers } : null;
-    }
-    if (key.startsWith("daily:")) return this.listRow(key.slice(6))?.list ?? null;
-    if (key.startsWith("pool:")) {
-      const r = this.q("SELECT payload FROM ranked_pool WHERE id = ?", Number(key.slice(5)));
-      return r.length ? (JSON.parse(String(r[0].payload)) as TopTen) : null;
+  private async createRoom(): Promise<{ code: string; room: DurableObjectStub } | null> {
+    for (let i = 0; i < 6; i++) {
+      const code = makeCode();
+      const room = this.env.ROOM.get(this.env.ROOM.idFromName(code));
+      const response = await room.fetch("https://room/init");
+      if (response.status === 200) return { code, room };
     }
     return null;
   }
 
-  /** Lists for ranked come from the built-ins, past daily lists and a pool the scheduled job tops up. Never today's or later. */
+  /** Lists for ranked come from built-ins, past daily lists and a scheduled pool. Prefer the newest available data year. */
   private pickList(ids: string[]): { key: string; list: TopTen } {
     const recent = new Set<string>();
     for (const id of ids) for (const k of this.ratingRow(id).recent) recent.add(k);
-    const keys = [
-      ...CLASSICS.map((c) => `classic:${c.id}`),
-      ...this.q("SELECT date FROM daily_lists WHERE date < ? AND status = 'ok'", this.today()).map((r) => `daily:${r.date}`),
-      ...this.q("SELECT id FROM ranked_pool").map((r) => `pool:${r.id}`),
-    ];
-    const fresh = keys.filter((k) => !recent.has(k));
-    const choices = fresh.length ? fresh : keys;
+    const candidates: { key: string; list: TopTen; year: number }[] = CLASSICS.map((c) => {
+      const list = { title: c.title, basis: c.basis, source: c.source, answers: c.answers };
+      return { key: `classic:${c.id}`, list, year: dataYear(c.title, list) };
+    });
+    for (const row of this.q("SELECT date, topic, payload FROM daily_lists WHERE date < ? AND status = 'ok'", this.today())) {
+      const list = JSON.parse(String(row.payload)) as TopTen;
+      candidates.push({ key: `daily:${row.date}`, list, year: dataYear(String(row.topic), list) });
+    }
+    for (const row of this.q("SELECT id, topic, payload, data_year FROM ranked_pool")) {
+      const list = JSON.parse(String(row.payload)) as TopTen;
+      const year = Number(row.data_year) || dataYear(String(row.topic), list);
+      candidates.push({ key: `pool:${row.id}`, list, year });
+    }
+    const fresh = candidates.filter((candidate) => !recent.has(candidate.key));
+    const available = fresh.length ? fresh : candidates;
+    const latestYear = Math.max(0, ...available.map((candidate) => candidate.year));
+    const choices = latestYear ? available.filter((candidate) => candidate.year === latestYear) : available;
     for (let i = 0; i < 5; i++) {
-      const key = choices[Math.floor(Math.random() * choices.length)];
-      const list = this.loadKey(key);
-      if (list) return { key, list };
+      const selected = choices[Math.floor(Math.random() * choices.length)];
+      if (selected) return selected;
     }
     const c = CLASSICS[0];
     return { key: `classic:${c.id}`, list: { title: c.title, basis: c.basis, source: c.source, answers: c.answers } };
   }
 
-  private async makeMatch(x: QueueEntry, y: QueueEntry): Promise<void> {
+  private async makeMatch(x: QueueEntry, y: QueueEntry): Promise<{ code: string; matchId: string } | null> {
     const [a, b] = Math.random() < 0.5 ? [x, y] : [y, x];
     const { key, list } = this.pickList([a.id, b.id]);
-    let room: DurableObjectStub | null = null;
-    let code = "";
-    for (let i = 0; i < 6 && !room; i++) {
-      code = makeCode();
-      const stub = this.env.ROOM.get(this.env.ROOM.idFromName(code));
-      const res = await stub.fetch("https://room/init");
-      if (res.status === 200) room = stub;
-    }
-    if (!room) return;
+    const created = await this.createRoom();
+    if (!created) return null;
     const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (n) => n.toString(16).padStart(2, "0")).join("");
-    this.q("INSERT INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before, title) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)", id, Date.now(), code, a.id, b.id, key, a.rating, b.rating, String(list.title).slice(0, 100));
-    const res = await room.fetch("https://room/ranked-setup", {
+    this.q("INSERT INTO matches (id, ts, code, a, b, list_key, status, a_before, b_before, title) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)", id, Date.now(), created.code, a.id, b.id, key, a.rating, b.rating, String(list.title).slice(0, 100));
+    const res = await created.room.fetch("https://room/ranked-setup", {
       method: "POST",
       body: JSON.stringify({ matchId: id, listKey: key, list, players: [{ id: a.id, name: a.name, rating: a.rating }, { id: b.id, name: b.name, rating: b.rating }] }),
     });
-    if (!res.ok) this.q("UPDATE matches SET status = 'aborted', reason = 'setup failed' WHERE id = ?", id);
+    if (!res.ok) {
+      this.q("UPDATE matches SET status = 'aborted', reason = 'setup failed' WHERE id = ?", id);
+      return null;
+    }
+    return { code: created.code, matchId: id };
   }
 
   /** Called by the match room when a ranked game ends. Safe to call twice: the first result wins. */
@@ -770,6 +925,7 @@ export class Arena extends DurableObject<Env> {
     }
     if (o.winner === "abort") {
       this.q("UPDATE matches SET status = 'aborted', outcome = 'abort', reason = ? WHERE id = ?", String(o.reason).slice(0, 80), matchId);
+      this.q("UPDATE ranked_invites SET status = 'completed' WHERE match_id = ?", matchId);
       return done({ outcome: "abort", aDelta: 0, bDelta: 0 });
     }
     const a = String(m.a), b = String(m.b);
@@ -790,6 +946,7 @@ export class Arena extends DurableObject<Env> {
       "UPDATE matches SET status = 'done', a_before = ?, b_before = ?, a_delta = ?, b_delta = ?, outcome = ?, reason = ?, a_risk = ?, b_risk = ?, flags = ? WHERE id = ?",
       ra.rating, rb.rating, aDelta, bDelta, o.winner, String(o.reason).slice(0, 80), Math.round(o.aRisk ?? 0), Math.round(o.bRisk ?? 0), JSON.stringify(o.flags ?? {}).slice(0, 600), matchId,
     );
+    this.q("UPDATE ranked_invites SET status = 'completed' WHERE match_id = ?", matchId);
     return done({ outcome: o.winner, aDelta, bDelta, aRating: ra.rating + aDelta, bRating: rb.rating + bDelta });
   }
 
@@ -811,10 +968,15 @@ export class Arena extends DurableObject<Env> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
     const r = this.ratingRow(acc.id);
-    const mine = this.ladderRows(this.ladderMin(), acc.id).find((x) => x.me);
+    const minGames = this.ladderMin();
+    const ladder = this.ladderRows(minGames, acc.id);
+    const mine = ladder.find((x) => x.me);
+    const ladderRows = ladder.map(({ id: _id, ...row }) => row);
     return {
       ok: true, name: acc.name, avatar: this.avatarOf(acc.id, acc.avatar), rating: r.rating, games: r.games, wins: r.wins, losses: r.losses, draws: r.draws, peak: r.peak,
-      provisional: r.games < PROVISIONAL_GAMES, rank: mine ? mine.rank : null, ...this.statusFor(acc.id),
+      provisional: r.games < PROVISIONAL_GAMES, rank: mine ? mine.rank : null,
+      ladder: { rows: ladderRows.slice(0, 50), me: ladderRows.find((row) => row.me && row.rank > 50) ?? null, minGames },
+      ...this.statusFor(acc.id),
     };
   }
 
@@ -957,7 +1119,7 @@ export class Arena extends DurableObject<Env> {
 
   private friendRow(id: string) {
     return this.q(
-      "SELECT f.status, f.requested_by, a.id AS other, a.name AS name, a.avatar AS avatar FROM friendships f JOIN accounts a ON a.id = CASE WHEN f.lo = ? THEN f.hi ELSE f.lo END WHERE (f.lo = ? OR f.hi = ?) AND a.banned = 0 AND a.name IS NOT NULL ORDER BY a.name ASC",
+      "SELECT f.status, f.requested_by, a.id AS other, a.name AS name, a.avatar AS avatar, r.rating AS rating FROM friendships f JOIN accounts a ON a.id = CASE WHEN f.lo = ? THEN f.hi ELSE f.lo END LEFT JOIN ratings r ON r.account_id = a.id WHERE (f.lo = ? OR f.hi = ?) AND a.banned = 0 AND a.name IS NOT NULL ORDER BY a.name ASC",
       id, id, id,
     );
   }
@@ -965,17 +1127,134 @@ export class Arena extends DurableObject<Env> {
   async friendsList(token: string | null): Promise<any> {
     const acc = await this.account(token);
     if (!acc) return fail(401, "Sign in first.");
+    const now = Date.now();
+    this.q("UPDATE ranked_invites SET status = 'expired' WHERE (sender = ? OR recipient = ?) AND status IN ('pending', 'accepted', 'creating') AND expires <= ?", acc.id, acc.id, now);
     const friends: any[] = [], incoming: any[] = [], outgoing: any[] = [];
-    for (const r of this.friendRow(acc.id)) {
+    const rows = this.friendRow(acc.id);
+    const friendIds = rows.filter((r) => String(r.status) === "accepted").map((r) => String(r.other));
+    const friendSet = new Set(friendIds);
+    const matched = new Set<string>();
+    if (friendIds.length) {
+      this.expireActive();
+      for (let offset = 0; offset < friendIds.length; offset += 400) {
+        const batch = friendIds.slice(offset, offset + 400);
+        const marks = batch.map(() => "?").join(", ");
+        const active = this.q(
+          `SELECT a, b FROM matches WHERE status = 'active' AND (a IN (${marks}) OR b IN (${marks}))`,
+          ...batch, ...batch,
+        );
+        for (const row of active) {
+          if (friendSet.has(String(row.a))) matched.add(String(row.a));
+          if (friendSet.has(String(row.b))) matched.add(String(row.b));
+        }
+      }
+    }
+    for (const r of rows) {
       const other = String(r.other);
-      const entry = { name: String(r.name), avatar: this.avatarOf(other, r.avatar), rating: this.peekRating(other).rating };
+      const entry = { name: String(r.name), avatar: this.avatarOf(other, r.avatar), rating: Number(r.rating) || START_RATING };
       const status = String(r.status);
       if (status === "accepted") {
-        const act = this.statusFor(other);
-        friends.push({ ...entry, activity: act.status === "matched" ? "In a ranked match" : act.status === "waiting" ? "Looking for a match" : null });
+        friends.push({ ...entry, activity: matched.has(other) ? "In a ranked match" : this.queue.has(other) ? "Looking for a match" : null });
       } else if (status === "pending") (String(r.requested_by) === acc.id ? outgoing : incoming).push(entry);
     }
-    return { ok: true, friends, incoming, outgoing };
+    const invites = this.q(
+      "SELECT i.id, i.sender, i.recipient, i.mode, i.status, i.code, i.created, a.name AS sender_name, b.name AS recipient_name FROM ranked_invites i JOIN accounts a ON a.id = i.sender JOIN accounts b ON b.id = i.recipient WHERE (i.sender = ? OR i.recipient = ?) AND i.status IN ('pending', 'accepted') AND i.expires > ? ORDER BY i.created DESC LIMIT 50",
+      acc.id, acc.id, now,
+    ).map((r) => ({
+      id: String(r.id),
+      name: String(r.sender) === acc.id ? String(r.recipient_name) : String(r.sender_name),
+      direction: String(r.sender) === acc.id ? "outgoing" : "incoming",
+      mode: String(r.mode),
+      status: String(r.status),
+      code: r.code === null ? null : String(r.code),
+      created: Number(r.created),
+    }));
+    return {
+      ok: true, friends, incoming, outgoing,
+      incomingInvites: invites.filter((invite) => invite.direction === "incoming"),
+      outgoingInvites: invites.filter((invite) => invite.direction === "outgoing"),
+    };
+  }
+
+  async rankedInvite(token: string | null, action: string, value: string, modeRaw?: string): Promise<any> {
+    const acc = await this.account(token);
+    if (!acc) return fail(401, "Sign in first.");
+    if (!acc.name) return fail(400, "Choose a username first.");
+
+    if (action === "send") {
+      const target = this.findByName(value);
+      if (!target) return fail(404, "No player with that username.");
+      if (target.id === acc.id) return fail(400, "That's you.");
+      if (this.relationship(acc.id, target.id) !== "friends") return fail(403, "You can only invite a friend to a ranked game.");
+      if (modeRaw !== "rated" && modeRaw !== "casual") return fail(400, "Choose a rated or casual game.");
+      if (this.activeMatch(acc.id) || this.activeMatch(target.id)) return fail(409, "You or your friend is already in a ranked match.");
+      if (this.queue.has(acc.id) || this.queue.has(target.id)) return fail(409, "You or your friend is looking for a ranked match. Leave the queue before sending or accepting an invite.");
+      const now = Date.now();
+      const existing = this.q(
+        "SELECT id FROM ranked_invites WHERE ((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)) AND status IN ('pending', 'accepted', 'creating') AND expires > ? LIMIT 1",
+        acc.id, target.id, target.id, acc.id, now,
+      );
+      if (existing.length) return fail(409, "There's already an open game invitation between you.");
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      this.q("INSERT INTO ranked_invites (id, sender, recipient, mode, status, created, expires) VALUES (?, ?, ?, ?, 'pending', ?, ?)", id, acc.id, target.id, modeRaw, now, now + 24 * 60 * 60_000);
+      return { ok: true, id, mode: modeRaw, status: "pending" };
+    }
+
+    if (!/^[a-f0-9]{24}$/.test(value)) return fail(400, "That game invitation is invalid.");
+    const rows = this.q("SELECT * FROM ranked_invites WHERE id = ?", value);
+    if (!rows.length) return fail(404, "That game invitation has expired or doesn't exist.");
+    const invite = rows[0];
+    const sender = String(invite.sender), recipient = String(invite.recipient), status = String(invite.status);
+    if (action === "cancel" && sender === acc.id && status === "pending") {
+      this.q("UPDATE ranked_invites SET status = 'cancelled' WHERE id = ?", value);
+      return { ok: true, status: "cancelled" };
+    }
+    if (action === "decline" && recipient === acc.id && status === "pending") {
+      this.q("UPDATE ranked_invites SET status = 'declined' WHERE id = ?", value);
+      return { ok: true, status: "declined" };
+    }
+    if (action !== "accept" || recipient !== acc.id) return fail(404, "That game invitation isn't available to you.");
+    if (status === "accepted" && invite.code) return { ok: true, status, mode: String(invite.mode), code: String(invite.code) };
+    if (status !== "pending" || Number(invite.expires) <= Date.now()) return fail(409, "That game invitation has expired or was already handled.");
+    if (this.relationship(sender, recipient) !== "friends") return fail(403, "You must still be friends to play this invitation.");
+    const senderAccount = this.q("SELECT id, name, banned FROM accounts WHERE id = ?", sender)[0];
+    const recipientAccount = this.q("SELECT id, name, banned FROM accounts WHERE id = ?", recipient)[0];
+    if (!senderAccount?.name || !recipientAccount?.name || Number(senderAccount.banned) || Number(recipientAccount.banned)) return fail(403, "One of these accounts can't play.");
+    if (this.activeMatch(sender) || this.activeMatch(recipient)) return fail(409, "You or your friend is already in a ranked match.");
+    if (this.queue.has(sender) || this.queue.has(recipient)) return fail(409, "You or your friend is looking for a ranked match. Leave the queue before accepting this invite.");
+    this.q("UPDATE ranked_invites SET status = 'creating', expires = ? WHERE id = ?", Date.now() + 60_000, value);
+    this.reservedPlayers.add(sender);
+    this.reservedPlayers.add(recipient);
+    this.queue.delete(sender);
+    this.queue.delete(recipient);
+
+    try {
+      let code: string;
+      if (String(invite.mode) === "rated") {
+        const senderRating = this.ratingRow(sender).rating;
+        const recipientRating = this.ratingRow(recipient).rating;
+        const match = await this.makeMatch(
+          { id: sender, name: String(senderAccount.name), rating: senderRating, since: Date.now(), lastPoll: Date.now() },
+          { id: recipient, name: String(recipientAccount.name), rating: recipientRating, since: Date.now(), lastPoll: Date.now() },
+        );
+        if (!match) throw new Error("Couldn't create the rated match room.");
+        code = match.code;
+        this.q("UPDATE ranked_invites SET status = 'accepted', code = ?, match_id = ?, expires = ? WHERE id = ?", code, match.matchId, Date.now() + 6 * 60 * 60_000, value);
+      } else {
+        const room = await this.createRoom();
+        if (!room) throw new Error("Couldn't create the casual game room.");
+        code = room.code;
+        this.q("UPDATE ranked_invites SET status = 'accepted', code = ?, expires = ? WHERE id = ?", code, Date.now() + 6 * 60 * 60_000, value);
+      }
+      return { ok: true, status: "accepted", mode: String(invite.mode), code };
+    } catch (error) {
+      console.error("ranked friend invitation failed:", error);
+      this.q("UPDATE ranked_invites SET status = 'failed' WHERE id = ?", value);
+      return fail(503, "Couldn't create that game. Please try again.");
+    } finally {
+      this.reservedPlayers.delete(sender);
+      this.reservedPlayers.delete(recipient);
+    }
   }
 
   private findByName(name: unknown) {
@@ -1034,6 +1313,7 @@ export class Arena extends DurableObject<Env> {
       case "remove": {
         if (rel !== "friends") return fail(404, `${target.name} isn't on your friends list.`);
         this.q("DELETE FROM friendships WHERE lo = ? AND hi = ?", lo, hi);
+        this.q("UPDATE ranked_invites SET status = 'cancelled' WHERE sender IN (?, ?) AND recipient IN (?, ?) AND status IN ('pending', 'accepted', 'creating')", acc.id, target.id, acc.id, target.id);
         return { ok: true, status: "none" };
       }
       default:
@@ -1050,8 +1330,8 @@ export class Arena extends DurableObject<Env> {
   private async addPoolList(): Promise<boolean> {
     const topic = DAILY_TOPICS[(this.poolSize() * 7 + 3) % DAILY_TOPICS.length];
     try {
-      const list = await generateTopTen(this.env, topic, "easy", this.systemHooks());
-      this.q("INSERT INTO ranked_pool (topic, payload, created) VALUES (?, ?, ?)", topic, JSON.stringify(list), Date.now());
+      const list = await generateTopTen(this.env, topic, "easy", this.systemHooks(), true);
+      this.q("INSERT INTO ranked_pool (topic, payload, created, data_year) VALUES (?, ?, ?, ?)", topic, JSON.stringify(list), Date.now(), dataYear(topic, list));
       return true;
     } catch (err) {
       console.error("pool list failed:", err instanceof AiError ? err.message : err);
@@ -1081,7 +1361,7 @@ export class Arena extends DurableObject<Env> {
       source: String(list.source ?? "").slice(0, 140),
       answers: answers.map((a: any) => ({ answer: String(a.answer).slice(0, 60), aliases: (Array.isArray(a.aliases) ? a.aliases : []).map((x: unknown) => String(x).slice(0, 60)).slice(0, 6), ...(a.detail ? { detail: String(a.detail).slice(0, 80) } : {}) })),
     };
-    this.q("INSERT INTO ranked_pool (topic, payload, created) VALUES (?, ?, ?)", clean.title, JSON.stringify(clean), Date.now());
+    this.q("INSERT INTO ranked_pool (topic, payload, created, data_year) VALUES (?, ?, ?, ?)", clean.title, JSON.stringify(clean), Date.now(), dataYear(clean.title, clean));
     return { ok: true, poolSize: this.poolSize() };
   }
 

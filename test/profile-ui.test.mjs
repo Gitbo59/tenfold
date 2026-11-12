@@ -29,6 +29,8 @@ async function page(hash, browser) {
   const w = dom.window;
   w.fetch = (u, o = {}) => { const headers = { ...(o.headers || {}) }; if (browser) headers.cookie = browser.cookie(); if (o.method === "POST") headers.Origin = BASE; return fetch(new URL(u, BASE), { ...o, headers, redirect: "manual" }); };
   w.confirm = () => true;
+  w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  w.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
   for (const code of src) w.eval(code);
   const $ = (s) => w.document.querySelector(s); const $$ = (s) => [...w.document.querySelectorAll(s)];
   const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch {} await sleep(40); } return false; };
@@ -59,6 +61,7 @@ await quin.post("/api/friends/accept", { name: "Pat" });
 await rae.post("/api/friends/request", { name: "Pat" });
 await hub.go("#/"); await hub.go("#/ranked");
 ok(await hub.until(() => /Quin2/.test(hub.$("#fr-list").textContent) && hub.$("#fr-sent").hidden), "once they accept, they appear in your friends list");
+ok(!hub.$("#fr-list [data-challenge]") && !hub.$("#fr-list [data-play-mode]"), "the friends list links to profiles without showing challenge actions");
 ok(!hub.$("#fr-requests").hidden && /Rae/.test(hub.$("#fr-incoming").textContent) && hub.$$("#fr-incoming [data-fr]").map((b) => b.dataset.fr).join() === "accept,decline", "an incoming request appears with Accept and Decline");
 hub.click(hub.$("#fr-incoming [data-fr=accept]"));
 ok(await hub.until(() => hub.$("#fr-requests").hidden && /Rae/.test(hub.$("#fr-list").textContent) && /\(2\)/.test(hub.$("#fr-count").textContent)), "accepting moves them into your friends (and the count updates)");
@@ -67,8 +70,21 @@ ok(hub.$("#fr-list a.plink").getAttribute("href") === "#/u/Quin2", "friends' nam
 console.log("another player's profile");
 const pp = await page("#/u/Quin2", pat);
 ok(await pp.until(() => /Quin2/.test(pp.$("#pl-body").textContent) && !!pp.$("#pl-body svg.av")), "opens from the link and shows their name and picture");
+ok(pp.$("#pl-body .pl-nav .pl-back")?.getAttribute("href") === "#/ranked" && pp.$("#pl-body .pl-nav .pl-back")?.getAttribute("aria-label") === "Back to Ranked hub" && (pp.$("#pl-body .pl-nav").compareDocumentPosition(pp.$("#pl-body .pl-head")) & 4), "the prominent Ranked hub back button sits above the profile header");
 ok(/1200/.test(pp.$("#pl-body .rating-big").textContent) && /Provisional rating/.test(pp.$("#pl-body").textContent) && /member since/.test(pp.$("#pl-body").textContent), "with their rating and member-since");
+ok(pp.$("#pl-body .pl-summary .pl-head") && pp.$("#pl-body .pl-summary .pl-record") && pp.$("#pl-body .pl-games") && (pp.$("#pl-body .pl-summary").compareDocumentPosition(pp.$("#pl-body .pl-games")) & 4), "ranked record shares the profile overview and recent games sit below it");
 ok(!!pp.$(".friend-badge") && !!pp.$("[data-act=remove]") && pp.$$("#pl-body .stat").length === 5 && /No ranked games yet/.test(pp.$("#pl-body").textContent), "a friend: badge, Remove button, full stats and recent games");
+ok(!!pp.$("#pl-body .profile-side [data-challenge]") && !!pp.$("#profile-challenge-dialog") && !pp.$("#profile-challenge-dialog").hasAttribute("open") && (pp.$("#pl-body .profile-side [data-challenge]").compareDocumentPosition(pp.$("#pl-body .profile-rating")) & 4), "the Challenge button is top-right and its options are in a closed dialog");
+pp.click(pp.$("#pl-body [data-challenge]"));
+ok(await pp.until(() => pp.$("#profile-challenge-dialog").hasAttribute("open") && pp.$$("#profile-challenge-dialog [data-play-mode]").map((b) => b.textContent).join("|") === "Ranked|For fun"), "Challenge opens a popup with both modes");
+pp.click(pp.$("#profile-challenge-dialog [data-close-challenge]"));
+ok(await pp.until(() => !pp.$("#profile-challenge-dialog").hasAttribute("open")), "the challenge popup can be dismissed without changing the page");
+pp.click(pp.$("#pl-body [data-challenge]"));
+pp.click(pp.$('#profile-challenge-dialog [data-play-mode="casual"]'));
+ok(await pp.until(() => /For fun game invitation sent/.test(pp.$("#toasts").textContent) && !pp.$("#profile-challenge-dialog").hasAttribute("open")), "choosing For fun sends the invitation and closes the popup");
+const profileInvite = (await pat.json("/api/friends")).outgoingInvites.find((invite) => invite.name === "Quin2");
+ok(profileInvite?.mode === "casual", "the outgoing invitation targets the profile being viewed");
+if (profileInvite) await pat.post("/api/ranked/invites/cancel", { id: profileInvite.id });
 pp.click(pp.$("[data-act=remove]"));
 ok(await pp.until(() => !!pp.$("[data-act=request]") && !pp.$(".friend-badge")), "removing a friend turns the button back into Add friend");
 pp.click(pp.$("[data-act=request]"));
@@ -79,7 +95,7 @@ ok(await pp.until(() => !!pp.$(".friend-badge")), "(and accepting on their side 
 await pp.go("#/u/Rae");
 ok(await pp.until(() => /Rae/.test(pp.$("#pl-body .profile-name").textContent)), "opening another profile from the address works");
 await pp.go("#/u/Pat");
-ok(await pp.until(() => /Pat/.test(pp.$("#pl-body .profile-name").textContent) && pp.$("#pl-body .pl-actions a").getAttribute("href") === "#/me"), "your own profile page offers 'Edit your profile'");
+ok(await pp.until(() => /Pat/.test(pp.$("#pl-body .profile-name").textContent) && pp.$("#pl-body .pl-actions a").getAttribute("href") === "#/me" && pp.$("#pl-body .pl-actions a").classList.contains("pl-back")), "your own profile page offers a styled 'Edit your profile' button");
 await pp.go("#/u/Sam");
 ok(await pp.until(() => /Private profile/.test(pp.$("#pl-body").textContent) && pp.$$("#pl-body .stat").length === 0 && /1200/.test(pp.$("#pl-body .rating-big").textContent)), "a private profile shows only name, picture and rating to non-friends");
 await pp.go("#/u/Tom1");
@@ -90,7 +106,8 @@ ok((await page("#/u/Quin2", null)).w.location.hash === "#/u/Quin2" && await (asy
 
 console.log("your profile screen");
 const me = await page("#/me", pat);
-ok(await me.until(() => /Signed in as Pat/.test(me.$("#me-sub").textContent)), "opens from the hub link and says who you are");
+ok(await me.until(() => me.$("#me-title").textContent === "Pat" && me.$("#me-sub").textContent === "Your profile"), "shows your username as the large profile heading");
+ok(me.$("#screen-me .me-back").classList.contains("pl-back") && !!me.$("#screen-me .me-back .pl-back-icon"), "your profile back button matches the Ranked hub button style");
 ok(me.$$("#av-colors .swatch").length === 12 && me.$$("#av-icons .swatch").length === 12 && !!me.$("#me-avatar svg"), "picture: 12 colours and 12 pictures, with a preview");
 me.click(me.$('#av-colors [data-color="3"]')); me.click(me.$('#av-icons [data-icon="5"]')); me.click(me.$("#av-save"));
 ok(await me.until(async () => true) && await (async () => { await sleep(500); return (await pat.json("/api/me")).avatar === "3:5"; })(), "choosing and saving a picture works");

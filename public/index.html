@@ -162,14 +162,13 @@
             <div class="profile-top">
               <a class="profile-link" href="#/me" aria-label="Open your profile"><span id="rk-avatar" class="profile-avatar"></span></a>
               <div class="profile-id">
-                <h1 class="display profile-name"><a id="rk-name" class="profile-link" href="#/me"></a></h1>
+                <h1 class="display profile-name"><a id="rk-name" class="profile-link" href="#/me"></a><a id="rk-edit-profile" class="profile-edit-icon" href="#/me" aria-label="Edit your profile" title="Edit your profile"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></a></h1>
                 <p id="rk-sub" class="hint"></p>
               </div>
               <div class="profile-rating"><span id="rk-rating" class="rating-big">1200</span><span class="hint">rating</span></div>
             </div>
             <div id="rk-stats" class="stat-row"></div>
             <div id="rk-trend" class="trend"></div>
-            <a id="rk-edit-profile" class="btn btn-small" href="#/me">View and edit profile</a>
           </section>
 
           <section class="panel play-card" aria-label="Ranked match">
@@ -206,6 +205,11 @@
               <input id="fr-add-name" maxlength="16" placeholder="Add a friend by username" aria-label="Friend's username">
               <button class="btn btn-small btn-primary" type="submit">Send request</button>
             </form>
+            <div id="fr-game-invites" hidden>
+              <h3 class="h3">Ranked game invitations</h3>
+              <ul id="fr-game-incoming" class="fr-list"></ul>
+              <ul id="fr-game-outgoing" class="fr-list"></ul>
+            </div>
             <div id="fr-requests" hidden>
               <h3 class="h3">Requests</h3>
               <ul id="fr-incoming" class="fr-list"></ul>
@@ -240,9 +244,9 @@
 
     <!-- Your profile (settings) -->
     <section id="screen-me" class="screen me" hidden>
-      <a class="back-link" href="#/ranked">Back to Ranked</a>
+      <a class="btn pl-back me-back" href="#/ranked" aria-label="Back to Ranked hub"><span class="pl-back-icon" aria-hidden="true">←</span><span>Ranked hub</span></a>
       <div class="daily-head">
-        <h1 class="display daily-title">Your profile</h1>
+        <h1 id="me-title" class="display daily-title"></h1>
         <p id="me-sub" class="lede"></p>
       </div>
       <div class="me-grid">
@@ -305,7 +309,6 @@
 
     <!-- Another player's profile -->
     <section id="screen-player" class="screen player" hidden>
-      <a class="back-link" href="#/ranked">Back to Ranked</a>
       <div id="pl-body"></div>
     </section>
 
@@ -334,7 +337,7 @@
       <div class="lobby-right">
         <div class="panel settings">
           <h2 class="h2">Match settings</h2>
-          <p id="settings-note" class="hint" hidden>Only the host can change these.</p>
+          <p id="settings-note" class="hint" hidden>Only the leader can change these.</p>
 
           <div class="setting">
             <div class="setting-text">
@@ -368,17 +371,6 @@
 
           <div class="setting">
             <div class="setting-text">
-              <span class="setting-name" id="diff-label">List difficulty</span>
-              <span class="hint">Easy lists use well-known answers. Hard lists make you think.</span>
-            </div>
-            <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
-              <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
-              <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
-            </div>
-          </div>
-
-          <div class="setting">
-            <div class="setting-text">
               <label class="setting-name" for="hints-val">Hints per game</label>
               <span class="hint">A hint unlocks when every player still in the game votes for one.</span>
             </div>
@@ -388,15 +380,43 @@
               <button id="hints-inc" class="step" type="button" aria-label="More hints">+</button>
             </div>
           </div>
+
+          <label class="setting">
+            <span class="setting-text">
+              <span class="setting-name">Prefer the latest year</span>
+              <span class="hint">AI lists favor current-year data when reliable, or the latest complete year.</span>
+            </span>
+            <input id="prefer-latest-year" class="switch" type="checkbox" role="switch">
+          </label>
         </div>
 
         <div class="panel topic" id="topic-panel">
           <h2 class="h2">Topic</h2>
           <label class="field">
-            <span class="field-label">What should the top ten be about?</span>
+            <span id="topic-label" class="field-label">What should the top ten be about?</span>
             <input id="topic" maxlength="120" placeholder="e.g. Best-selling video game consoles of all time">
           </label>
+          <label class="field">
+            <span class="field-label">Or import a ranked list from a webpage</span>
+            <input id="list-url" type="url" maxlength="2048" placeholder="https://example.com/top-ten">
+          </label>
+          <button id="btn-custom-list" class="btn btn-small custom-list-toggle" type="button" aria-pressed="false">Enter all 10 answers yourself</button>
+          <fieldset id="custom-answers" class="custom-answers" hidden>
+            <legend>Ranked answers, from #1 to #10</legend>
+            <p class="hint">Enter the answers in order. All ten must be different.</p>
+            <div id="custom-answer-fields" class="custom-answer-fields"></div>
+          </fieldset>
           <div class="topic-tools">
+            <div class="suggestion-style">
+              <div class="setting-text">
+                <span class="setting-name" id="diff-label">Suggested topic category</span>
+                <span class="hint">Choose easy or hard suggestions. The selected style is used for that suggestion.</span>
+              </div>
+              <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
+                <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
+                <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
+              </div>
+            </div>
             <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>
             <div id="topic-chips" class="chips"></div>
           </div>
@@ -406,7 +426,7 @@
           </div>
           <p id="budget-note" class="hint budget-note"></p>
           <button id="btn-start" class="btn btn-primary btn-big" type="button">Build the list and start</button>
-          <p id="wait-note" class="hint" hidden>Waiting for the host to pick a topic. It stays secret until the game starts.</p>
+          <p id="wait-note" class="hint" hidden>Waiting for the leader to pick a topic. It stays secret until the game starts.</p>
         </div>
       </div>
     </section>
@@ -425,6 +445,7 @@
       <div class="game-head">
         <h2 id="g-title" class="display game-title"></h2>
         <p id="g-basis" class="basis"></p>
+        <p id="play-mode-note" class="presentation-note" hidden></p>
         <div class="source-row">
           <button id="btn-source" class="btn btn-small" type="button" aria-expanded="false" aria-controls="source-line">Show source</button>
           <p id="source-line" class="source-line" hidden></p>
@@ -450,8 +471,8 @@
         <ol id="res-list" class="standings"></ol>
         <div class="res-actions">
           <button id="btn-rematch" class="btn btn-primary" type="button">Play again</button>
-          <button id="btn-ranked-back" class="btn btn-primary" type="button" hidden>Back to Ranked</button>
-          <p id="res-wait" class="hint" hidden>Waiting for the host to start another round.</p>
+          <button id="btn-ranked-back" class="btn pl-back" type="button" hidden><span class="pl-back-icon" aria-hidden="true">←</span><span>Ranked hub</span></button>
+          <p id="res-wait" class="hint" hidden>Waiting for the leader to start another round.</p>
         </div>
       </div>
 
@@ -476,6 +497,47 @@
       </form>
     </section>
   </main>
+
+  <div id="score-setup-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="score-setup-title">
+      <h2 id="score-setup-title" class="h2">Set up players</h2>
+      <p id="score-setup-note" class="hint"></p>
+      <section id="solo-setup" class="solo-setup" hidden role="button" tabindex="0" aria-pressed="true" aria-labelledby="solo-setup-title">
+        <h3 id="solo-setup-title">Play solo</h3>
+        <p id="solo-setup-description">Start a no-score game and see how many answers you can find. You can add players to keep score instead.</p>
+      </section>
+      <fieldset id="play-options" class="play-options">
+        <legend>How do you want to play?</legend>
+        <label class="play-option">
+          <input type="radio" name="play-mode" value="automatic" checked>
+          <span><strong id="auto-play-title">Present the game to an audience</strong><small id="auto-play-note">With no extra players, guesses are shared and there is no score.</small></span>
+        </label>
+        <label class="play-option">
+          <input type="radio" name="play-mode" value="network">
+          <span><strong>Players take turns on their own devices</strong><small>Everyone answers for themselves and earns points.</small></span>
+        </label>
+      </fieldset>
+      <details id="score-roster-details" class="score-roster-details">
+        <summary>
+          <span>Add teammates <span class="optional">(optional)</span></span>
+          <small>Choose players in the lobby or add names for people sharing this device.</small>
+        </summary>
+        <div id="score-roster" class="score-roster">
+          <p class="hint">Add lobby players or people sharing this device. Scoring turns on automatically with more than one player.</p>
+          <ul id="score-player-list" class="score-player-list"></ul>
+          <form id="score-player-form" class="score-player-form" autocomplete="off">
+            <input id="score-player-name" maxlength="16" placeholder="Add a player name" aria-label="Local player name">
+            <button class="btn btn-small" type="submit">Add player</button>
+          </form>
+          <ul id="local-score-players" class="score-player-list local-score-players" aria-label="Added local players"></ul>
+        </div>
+      </details>
+      <div class="modal-actions">
+        <button id="score-setup-cancel" class="btn" type="button">Back</button>
+        <button id="score-setup-start" class="btn btn-primary" type="button">Start presentation</button>
+      </div>
+    </div>
+  </div>
 
   <div id="report-modal" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="report-title">

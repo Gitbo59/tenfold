@@ -19,26 +19,42 @@ class Client {
   async until(pred, ms = 8000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (this.state && pred(this.state)) return this.state; await sleep(25); } throw new Error("timeout; last=" + JSON.stringify(this.state && { phase: this.state.phase, turn: this.state.turnPid, hv: this.state.hintVotes, hl: this.state.hintsLeft }) + " toasts=" + JSON.stringify(this.toasts.slice(-3).map((t) => t.msg))); }
   async toast(re, from, ms = 4000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { const t = this.toasts.slice(from).find((x) => re.test(x.msg)); if (t) return t; await sleep(25); } return null; }
 }
-const solo = async (name = "Solo") => { const code = await newRoom(); const c = new Client(code, name); await c.ready; await c.until((s) => s.players.length === 1); return { code, c }; };
-const finishByMiss = async (c) => { c.send({ t: "guess", text: "zzz-nope" }); await c.until((s) => s.phase === "finished"); };
+const solo = async (name = "Solo", scored = true) => {
+  const code = await newRoom(); const c = new Client(code, name);
+  if (scored) {
+    const send = c.send.bind(c);
+    c.send = (message) => send(message.t === "start" && message.playMode === undefined
+      ? { ...message, playMode: "leader", extraPlayers: ["Practice player"] }
+      : message);
+  }
+  await c.ready; await c.until((s) => s.players.length === 1); return { code, c };
+};
+const finishByMiss = async (c) => {
+  for (let i = 0; i < 80 && c.state.phase === "playing"; i++) {
+    const wrongCount = c.state.wrong.length;
+    c.send({ t: "guess", text: `zzz-nope-${i}` });
+    await c.until((s) => s.phase === "finished" || s.wrong.length > wrongCount);
+  }
+  await c.until((s) => s.phase === "finished");
+};
 
 console.log("T1: difficulty, hints, reports");
 const code1 = await newRoom();
 const A = new Client(code1, "Alice"); await A.ready; await A.until((s) => s.players.length === 1);
 let B = new Client(code1, "Bob"); await B.ready; await A.until((s) => s.players.length === 2);
-ok(A.state.config.difficulty === "easy" && A.state.config.hints === 3, "defaults: easy list, 3 hints");
+ok(A.state.config.preferLatestYear === false && A.state.config.hints === 3, "defaults: latest-year preference off, 3 hints");
 ok(Array.isArray(A.state.classics) && A.state.classics.length === 6, "lobby offers 6 built-in lists");
-B.send({ t: "config", difficulty: "hard", hints: 5 }); await sleep(150);
-ok(A.state.config.difficulty === "easy", "non-host cannot change difficulty");
-A.send({ t: "config", difficulty: "hard", hints: 2, lives: 3, timerEnabled: false });
-await A.until((s) => s.config.difficulty === "hard" && s.config.hints === 2 && !s.config.timerEnabled);
-A.send({ t: "config", difficulty: "nonsense", hints: 99 });
+B.send({ t: "config", preferLatestYear: true, hints: 5 }); await sleep(150);
+ok(A.state.config.preferLatestYear === false, "non-host cannot change match settings");
+A.send({ t: "config", preferLatestYear: true, hints: 2, lives: 3, timerEnabled: false });
+await A.until((s) => s.config.preferLatestYear && s.config.hints === 2 && !s.config.timerEnabled);
+A.send({ t: "config", preferLatestYear: "yes", hints: 99 });
 await A.until((s) => s.config.hints === 5);
-ok(A.state.config.difficulty === "hard", "invalid difficulty ignored, hints clamped to 5");
+ok(A.state.config.preferLatestYear, "invalid latest-year preference ignored, hints clamped to 5");
 A.send({ t: "config", hints: 2 }); await A.until((s) => s.config.hints === 2);
 
 const m0 = await mock();
-A.send({ t: "start", topic: "NATO alphabet" });
+A.send({ t: "start", topic: "NATO alphabet", difficulty: "hard" });
 await A.until((s) => s.phase === "playing");
 const m1 = await mock();
 const last = m1.seen[m1.seen.length - 1];
@@ -116,22 +132,21 @@ ok(A.state.hintsLeft === 2 && A.state.answers.length === 0 && A.state.classics.l
 
 console.log("T2: cache and difficulty keys");
 const s2 = await solo("Cara");
-s2.c.send({ t: "config", difficulty: "hard", lives: 1, hints: 0 }); await s2.c.until((s) => s.config.lives === 1 && s.config.difficulty === "hard");
+s2.c.send({ t: "config", lives: 1, hints: 0 }); await s2.c.until((s) => s.config.lives === 1);
 let c0 = (await mock()).calls;
-s2.c.send({ t: "start", topic: "NATO alphabet" }); await s2.c.until((s) => s.phase === "playing");
+s2.c.send({ t: "start", topic: "NATO alphabet", difficulty: "hard", playMode: "leader", extraPlayers: ["Practice player"] }); await s2.c.until((s) => s.phase === "playing");
 ok((await mock()).calls === c0 + 1, "evicted list is regenerated once");
 ok(s2.c.state.hintsLeft === 0, "hints can be turned off (0)");
 await finishByMiss(s2.c); s2.c.send({ t: "rematch" }); await s2.c.until((s) => s.phase === "lobby");
 c0 = (await mock()).calls;
-s2.c.send({ t: "start", topic: "nato ALPHABET!" }); await s2.c.until((s) => s.phase === "playing");
+s2.c.send({ t: "start", topic: "nato ALPHABET!", playMode: "leader", extraPlayers: ["Practice player"] }); await s2.c.until((s) => s.phase === "playing");
 ok((await mock()).calls === c0 + 1, "a room replaying the same topic gets a fresh list when budget allows");
 const s3 = await solo("Dev");
 c0 = (await mock()).calls;
-s3.c.send({ t: "config", difficulty: "hard", lives: 1 }); await s3.c.until((s) => s.config.difficulty === "hard" && s.config.lives === 1);
-s3.c.send({ t: "start", topic: "  NATO   alphabet " }); await s3.c.until((s) => s.phase === "playing");
+s3.c.send({ t: "config", lives: 1 }); await s3.c.until((s) => s.config.lives === 1);
+s3.c.send({ t: "start", topic: "  NATO   alphabet ", difficulty: "hard" }); await s3.c.until((s) => s.phase === "playing");
 ok((await mock()).calls === c0, "another room asking for the same topic and difficulty is served from cache (0 AI calls)");
 await finishByMiss(s3.c); s3.c.send({ t: "rematch" }); await s3.c.until((s) => s.phase === "lobby");
-s3.c.send({ t: "config", difficulty: "easy" }); await s3.c.until((s) => s.config.difficulty === "easy");
 s3.c.send({ t: "start", topic: "tea varieties" }); await s3.c.until((s) => s.phase === "playing");
 const mm = await mock();
 ok(mm.calls === c0 + 1 && mm.seen.at(-1).easy, "easy and hard are cached separately; easy prompt used");
@@ -151,6 +166,54 @@ ok(s4.c.state.answers[1].found.points >= 9 && s4.c.state.answers[1].found.points
 s4.c.send({ t: "source" }); await s4.c.until((s) => s.log.some((l) => /Erin opened the source/.test(l.text)));
 s4.c.send({ t: "guess", text: "Parbat" }); await s4.c.until((s) => s.answers[8].found);
 ok(s4.c.state.log.some((l) => /accepting “Parbat”/.test(l.text)), "a partial name is accepted and the feed says what was typed");
+
+console.log("T3b: player-created lists");
+const manualRoom = await solo("Manual", false);
+manualRoom.c.send({ t: "start", manual: { title: "Quiz night", answers: Array.from({ length: 9 }, (_, i) => `Entry ${i + 1}`) } });
+ok(!!(await manualRoom.c.toast(/exactly 10 ranked answers/i, 0)) && manualRoom.c.state.phase === "lobby", "a player-created list requires exactly ten answers");
+manualRoom.c.send({ t: "start", manual: { title: "Quiz night", answers: ["First", "first!", ...Array.from({ length: 8 }, (_, i) => `Entry ${i + 3}`)] } });
+ok(!!(await manualRoom.c.toast(/10 different answers/i, 1)) && manualRoom.c.state.phase === "lobby", "duplicate answers are rejected after normalizing punctuation and case");
+const manualCalls = (await mock()).calls;
+manualRoom.c.send({ t: "start", playMode: "automatic", manual: { title: "Quiz night", answers: Array.from({ length: 10 }, (_, i) => `Manual answer ${i + 1}`) } });
+await manualRoom.c.until((s) => s.phase === "playing");
+ok(manualRoom.c.state.topic === "Quiz night" && manualRoom.c.state.basis === "Player-created list" && manualRoom.c.state.answers.every((answer) => answer.answer === undefined), "a valid custom list starts with answers hidden until guessed");
+ok((await mock()).calls === manualCalls, "player-created lists do not call AI");
+
+console.log("T3c: leader-controlled scoring and audience presentation");
+const leaderRoom = await solo("Director");
+const scoredAnswers = Array.from({ length: 10 }, (_, i) => `Scored entry ${i + 1}`);
+leaderRoom.c.send({
+  t: "start",
+  playMode: "leader",
+  assignedIds: [leaderRoom.c.pid],
+  extraPlayers: ["Local guest"],
+  manual: { title: "Scored list", answers: scoredAnswers },
+});
+await leaderRoom.c.until((s) => s.phase === "playing");
+const firstScorer = leaderRoom.c.state.players.find((p) => p.id === leaderRoom.c.state.turnPid);
+leaderRoom.c.send({ t: "guess", text: scoredAnswers[0] });
+await leaderRoom.c.until((s) => s.answers[0].found);
+ok(leaderRoom.c.state.answers[0].found.by === firstScorer.id && leaderRoom.c.state.players.find((p) => p.id === firstScorer.id).score > 0, "the leader can enter a guess on behalf of the assigned player and award their points");
+for (let i = 1; i < scoredAnswers.length; i++) {
+  leaderRoom.c.send({ t: "guess", text: scoredAnswers[i] });
+  await leaderRoom.c.until((s) => s.answers[i].found || s.phase === "finished");
+}
+ok(leaderRoom.c.state.phase === "finished" && leaderRoom.c.state.players.some((p) => p.name === "Local guest"), "a roster can include local players without another device");
+
+const audienceRoom = await solo("Presenter");
+const audienceAnswers = Array.from({ length: 10 }, (_, i) => `Audience entry ${i + 1}`);
+audienceRoom.c.send({ t: "start", playMode: "presented", manual: { title: "Audience list", answers: audienceAnswers } });
+await audienceRoom.c.until((s) => s.phase === "playing");
+const audienceLives = audienceRoom.c.state.players[0].lives;
+const audienceTurn = audienceRoom.c.state.turnPid;
+audienceRoom.c.send({ t: "guess", text: "Not on the list" });
+await audienceRoom.c.until((s) => s.wrong.includes("Not on the list"));
+ok(audienceRoom.c.state.playMode === "presented" && audienceRoom.c.state.players[0].lives === audienceLives && audienceRoom.c.state.turnPid === audienceTurn && !audienceRoom.c.state.deadline, "presentation mode has no score, lives penalty, or turn timer");
+for (const answer of audienceAnswers) {
+  audienceRoom.c.send({ t: "guess", text: answer });
+  await audienceRoom.c.until((s) => s.answers.some((a) => a.answer === answer && a.found) || s.phase === "finished");
+}
+ok(audienceRoom.c.state.phase === "finished" && audienceRoom.c.state.winners.length === 0 && audienceRoom.c.state.players[0].score === 0, "the audience can collectively clear the board without a scoreboard");
 
 console.log("T4: failures are refunded; retries are counted");
 const s5 = await solo("Finn"); let b0 = await budget(); c0 = (await mock()).calls;

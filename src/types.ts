@@ -14,6 +14,8 @@ export interface Env {
   AI_PROVIDER?: string;
   AI_MODEL?: string;
   AI_BASE_URL?: string;
+  /** Enables automatic test-account sign-in in Wrangler Preview deployments only. */
+  PREVIEW_MODE?: string;
   /** Secret for AI_PROVIDER=openai. */
   AI_API_KEY?: string;
   /** Secret for AI_PROVIDER=anthropic. */

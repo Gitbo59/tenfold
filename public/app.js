@@ -33,7 +33,15 @@
     "Highest-grossing anime films", "Largest islands in the Mediterranean", "Longest-reigning monarchs in history",
     "Most prolific chess grandmasters by rating", "Largest airports by passenger traffic", "Tallest waterfalls in Europe",
   ];
-  const pool = () => (state && state.config.difficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
+  let suggestionDifficulty = "easy";
+  let selectedSuggestionDifficulty = null;
+  let customListMode = false;
+  let playMode = "automatic";
+  let assignedPlayerIds = new Set();
+  let scoreRosterEdited = false;
+  let localScorePlayers = [];
+  let scoreSetupOpen = false;
+  const pool = () => (suggestionDifficulty === "hard" ? HARD_TOPICS : EASY_TOPICS);
   const pick = (n) => [...pool()].sort(() => Math.random() - 0.5).slice(0, n);
 
   // ------------------------------------------------------------------ state
@@ -47,6 +55,7 @@
   let ws = null;
   let code = null;
   let state = null;
+  let gameTicker = null;
   let skew = 0;
   let retries = 0;
   let leaving = false;
@@ -55,15 +64,45 @@
   let joinSent = false;
   let lastTurnPid = null;
   let lastLogId = null;
+  let audioContext = null;
   let configTimer = null;
   let selectedClassic = null;
-  let chipsFor = null;
   let classicsKey = "";
   let budgetAt = 0;
   let showSource = false; // per game: opening it is announced to the room, so it is never remembered
   let reportCtx = null;
   const animated = new Set();
   const myReports = new Set();
+
+  function prepareCorrectSound() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    audioContext ||= new AudioContext();
+    if (audioContext.state === "suspended") {
+      void audioContext.resume().catch((error) => console.warn("Correct-answer sound is unavailable.", error));
+    }
+    return audioContext;
+  }
+
+  function playCorrectSound() {
+    const context = prepareCorrectSound();
+    if (!context) return;
+    const start = context.currentTime;
+    [880, 1174].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const volume = context.createGain();
+      const at = start + index * 0.075;
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      volume.gain.setValueAtTime(0.0001, at);
+      volume.gain.exponentialRampToValueAtTime(0.18, at + 0.012);
+      volume.gain.exponentialRampToValueAtTime(0.0001, at + 0.24);
+      oscillator.connect(volume);
+      volume.connect(context.destination);
+      oscillator.start(at);
+      oscillator.stop(at + 0.25);
+    });
+  }
 
   // Local edits shown immediately; the server's echo confirms them (or they expire).
   const pending = {};
@@ -88,6 +127,8 @@
       if (a.dataset.mode === (name === "home" ? "fun" : "ranked")) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     }
+    window.dispatchEvent(new CustomEvent("tf:screen", { detail: name }));
+    updateGameTicker();
     if (name === "home") window.dispatchEvent(new Event("tf:home"));
   }
 
@@ -160,6 +201,12 @@
   function enterRoom(c) {
     code = c;
     leaving = false;
+    customListMode = false;
+    playMode = "automatic";
+    assignedPlayerIds = new Set();
+    scoreRosterEdited = false;
+    localScorePlayers = [];
+    scoreSetupOpen = false;
     state = null;
     retries = 0;
     sessionStorage.setItem("tf_room", c);
@@ -176,7 +223,7 @@
       try { ws.close(1000, "leave"); } catch {}
     }
     ws = null; state = null; code = null; joinSent = false; lastTurnPid = null; lastLogId = null;
-    selectedClassic = null; classicsKey = ""; chipsFor = null;
+    selectedClassic = null; classicsKey = ""; selectedSuggestionDifficulty = null;
     animated.clear(); myReports.clear();
     sessionStorage.removeItem("tf_room");
     history.replaceState(null, "", "/");
@@ -243,6 +290,7 @@
   }
 
   document.addEventListener("visibilitychange", () => {
+    updateGameTicker();
     if (document.visibilityState === "visible" && code && !leaving && (!ws || ws.readyState > 1)) {
       clearTimeout(reconnectTimer);
       connect();
@@ -253,6 +301,7 @@
     state = m;
     skew = m.serverNow - Date.now();
     render();
+    updateGameTicker();
   }
 
   // ------------------------------------------------------------------ rendering
@@ -284,7 +333,6 @@
   }
 
   function renderChips() {
-    chipsFor = state ? state.config.difficulty : "easy";
     $("#topic-chips").innerHTML = pick(4).map((t) => `<button class="chip" type="button">${esc(t)}</button>`).join("");
   }
 
@@ -296,6 +344,70 @@
       .map((c) => `<button class="chip" type="button" data-id="${esc(c.id)}" data-title="${esc(c.title)}" aria-pressed="false">${esc(c.title)}</button>`)
       .join("");
     $("#classics-wrap").hidden = !(list && list.length);
+  }
+
+  function renderCustomAnswerFields() {
+    $("#custom-answer-fields").innerHTML = Array.from({ length: 10 }, (_, index) =>
+      `<label class="field"><span class="field-label">Answer #${index + 1}</span><input type="text" maxlength="80" data-manual-answer="${index + 1}" autocomplete="off"></label>`,
+    ).join("");
+  }
+
+  function renderSoloSetupChoice() {
+    const soloSelected = !$("#score-roster-details").open;
+    $("#solo-setup").classList.toggle("selected", soloSelected);
+    $("#solo-setup").setAttribute("aria-pressed", String(soloSelected));
+    $("#solo-setup-description").hidden = !soloSelected;
+    $("#score-roster-details").classList.toggle("selected", !soloSelected);
+  }
+
+  function renderPlayOptions(s, isHost) {
+    const connectedPlayers = s.players.filter((p) => p.connected);
+    const connectedIds = new Set(connectedPlayers.map((p) => p.id));
+    assignedPlayerIds = new Set([...assignedPlayerIds].filter((id) => connectedIds.has(id)));
+    if (connectedPlayers.length > 1) playMode = "network";
+    else if (playMode === "network") playMode = "automatic";
+    if (!scoreRosterEdited) assignedPlayerIds = new Set(connectedPlayers.filter((p) => p.id !== pid).map((p) => p.id));
+    const additionalPlayers = [...assignedPlayerIds].filter((id) => id !== pid).length + localScorePlayers.length;
+    const multiplayerLobby = connectedPlayers.length > 1;
+    const teammatesSelected = $("#score-roster-details").open;
+    const effectivePlayMode = multiplayerLobby
+      ? "network"
+      : teammatesSelected && additionalPlayers > 0 ? "leader" : "presented";
+    $("#score-setup-modal").hidden = !scoreSetupOpen || !isHost;
+    const soloSetup = !multiplayerLobby;
+    $("#solo-setup").hidden = !soloSetup;
+    $("#score-setup-title").textContent = soloSetup ? "Ready to play solo?" : "Set up players";
+    $("#score-setup-note").textContent = soloSetup
+      ? "Your list is ready. Start playing now, or add players if you'd like to keep score."
+      : "Choose how everyone will take turns in this game.";
+    for (const input of $$('input[name="play-mode"]')) {
+      input.checked = input.value === playMode;
+      input.disabled = !isHost || (input.value === "network" && connectedPlayers.length < 2);
+    }
+    $('input[name="play-mode"][value="automatic"]').closest(".play-option").hidden = multiplayerLobby;
+    $('input[name="play-mode"][value="network"]').closest(".play-option").hidden = !multiplayerLobby || customListMode;
+    $("#play-options").hidden = soloSetup;
+    $("#score-roster-details").hidden = !isHost || (multiplayerLobby && playMode === "network");
+    renderSoloSetupChoice();
+    $("#score-roster").hidden = !isHost;
+    $("#auto-play-title").textContent = effectivePlayMode === "network"
+      ? "Players take turns on their own devices"
+      : effectivePlayMode === "presented" ? "Present the game to an audience" : "Leader enters guesses and keeps score";
+    $("#auto-play-note").textContent = effectivePlayMode === "network"
+      ? "Everyone answers for themselves and earns points."
+      : effectivePlayMode === "presented"
+        ? "No other players selected. The leader enters guesses with no score; add players below to turn scoring on."
+        : `Scoring is on for ${additionalPlayers + 1} players. The leader enters guesses for the current player.`;
+    $("#score-setup-start").textContent = effectivePlayMode === "network"
+      ? "Start multiplayer game"
+      : effectivePlayMode === "leader" ? "Start scored game" : "Start solo game";
+    $("#score-player-list").innerHTML = s.players
+      .filter((p) => p.connected)
+      .map((p) => `<li><label><input type="checkbox" data-score-player="${esc(p.id)}"${assignedPlayerIds.has(p.id) ? " checked" : ""}${p.id === pid ? " disabled" : ""}> ${esc(p.name)}${p.id === pid ? " (leader, included automatically)" : ""}</label></li>`)
+      .join("");
+    $("#local-score-players").innerHTML = localScorePlayers
+      .map((name, index) => `<li><span>${esc(name)}</span><button type="button" class="btn btn-small" data-remove-local-player="${index}" aria-label="Remove ${esc(name)}">Remove</button></li>`)
+      .join("");
   }
 
   async function refreshBudget() {
@@ -318,7 +430,7 @@
     $("#lobby-players").innerHTML = s.players
       .map(
         (p) =>
-          `<li>${avatar(p)}<span class="pname">${esc(p.name)}${p.id === pid ? " (you)" : ""}${p.id === s.hostId ? '<span class="tag">Host</span>' : ""}${p.connected ? "" : '<span class="tag tag-away">Away</span>'}</span></li>`,
+          `<li>${avatar(p)}<span class="pname">${esc(p.name)}${p.id === pid ? " (you)" : ""}${p.id === s.hostId ? '<span class="tag">Leader</span>' : ""}${p.connected ? "" : '<span class="tag tag-away">Away</span>'}</span>${isHost && !s.ranked && p.id !== pid && p.connected ? `<button type="button" class="btn btn-small" data-promote="${esc(p.id)}">Make leader</button>` : ""}</li>`,
       )
       .join("");
 
@@ -327,8 +439,8 @@
     const lives = effective("lives", c.lives);
     const timerEnabled = effective("timer", c.timerEnabled);
     const seconds = effective("seconds", c.turnSeconds);
-    const difficulty = effective("difficulty", c.difficulty);
     const hints = effective("hints", c.hints);
+    const preferLatestYear = effective("preferLatestYear", c.preferLatestYear);
 
     $("#lives-val").textContent = lives;
     $("#lives-dec").disabled = !isHost || lives <= 1;
@@ -343,8 +455,11 @@
     $("#timer-val").textContent = `${seconds} seconds`;
     $("#range-row").dataset.off = String(!timerEnabled);
 
+    const latestYear = $("#prefer-latest-year");
+    latestYear.checked = preferLatestYear;
+    latestYear.disabled = !isHost;
     for (const b of $$(".seg")) {
-      b.setAttribute("aria-checked", String(b.dataset.diff === difficulty));
+      b.setAttribute("aria-checked", String(b.dataset.diff === suggestionDifficulty));
       b.disabled = !isHost;
     }
     $("#hints-val").textContent = hints;
@@ -355,20 +470,22 @@
     // Topic: host only.
     $("#topic").disabled = !isHost;
     $("#topic").closest(".field").hidden = !isHost;
-    $(".topic-tools").hidden = !isHost;
-    $("#classics-wrap").hidden = !isHost || !(s.classics && s.classics.length);
+    $("#list-url").closest(".field").hidden = !isHost || customListMode;
+    $("#btn-custom-list").hidden = !isHost;
+    $("#btn-custom-list").setAttribute("aria-pressed", String(customListMode));
+    $("#btn-custom-list").textContent = customListMode ? "Use a suggested, built-in, or imported list" : "Enter all 10 answers yourself";
+    $("#topic-label").textContent = customListMode ? "Category / list title" : "What should the top ten be about?";
+    $("#topic").placeholder = customListMode ? "Enter a category or list title" : "e.g. Best-selling video game consoles of all time";
+    $("#custom-answers").hidden = !isHost || !customListMode;
+    $(".topic-tools").hidden = !isHost || customListMode;
+    $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     $("#budget-note").hidden = !isHost;
+    renderPlayOptions(s, isHost);
     $("#btn-start").hidden = !isHost;
+    $("#btn-start").textContent = "Start game";
     $("#wait-note").hidden = isHost;
-    if (chipsFor !== difficulty) {
-      // chips follow the selected difficulty
-      const prev = state.config.difficulty;
-      state.config.difficulty = difficulty;
-      renderChips();
-      state.config.difficulty = prev;
-      chipsFor = difficulty;
-    }
     renderClassics(s.classics);
+    $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     if (isHost) refreshBudget();
   }
 
@@ -391,7 +508,8 @@
 
   function renderHints(s, me) {
     const bar = $("#hint-bar");
-    const on = s.phase === "playing" && s.config.hints > 0 && me && !me.eliminated;
+    const canRequest = s.playMode !== "network" ? s.hostId === pid : me && !me.eliminated;
+    const on = s.phase === "playing" && s.config.hints > 0 && canRequest;
     bar.hidden = !on;
     if (!on) return;
     const voted = s.hintVotes.includes(pid);
@@ -399,36 +517,50 @@
     btn.disabled = s.hintsLeft <= 0;
     btn.setAttribute("aria-pressed", String(voted));
     const tally = `${s.hintVotes.length}/${s.hintVoters}`;
-    btn.textContent = s.hintsLeft <= 0 ? "No hints left" : voted ? `Voted for a hint (${tally})` : `Vote for a hint (${tally})`;
+    btn.textContent = s.hintsLeft <= 0
+      ? "No hints left"
+      : s.playMode === "presented"
+        ? "Reveal hint"
+        : voted ? `Voted for a hint (${tally})` : `Vote for a hint (${tally})`;
     $("#hint-note").textContent =
       s.hintsLeft > 0
-        ? `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left. One unlocks when everyone still playing votes.`
+        ? s.playMode === "presented"
+          ? `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left.`
+          : `${s.hintsLeft} ${s.hintsLeft === 1 ? "hint" : "hints"} left. One unlocks when everyone still playing votes.`
         : "";
   }
 
   function renderGame(s, me) {
     const finished = s.phase === "finished";
-    const isMyTurn = s.phase === "playing" && s.turnPid === pid;
+    const isController = s.playMode !== "network" && s.hostId === pid;
+    const isMyTurn = s.phase === "playing" && (isController || s.turnPid === pid);
     const cur = s.players.find((p) => p.id === s.turnPid);
+    const presented = s.playMode === "presented";
+    const leaderControlled = s.playMode === "leader";
 
     $("#btn-leave").hidden = !!(s.ranked && s.phase === "playing");
     $("#btn-resign").hidden = !(s.ranked && s.phase === "playing" && me);
     $("#g-title").textContent = s.topic;
     $("#g-basis").textContent = s.listDifficulty ? `${s.basis} (${s.listDifficulty} list)` : s.basis;
+    $("#play-mode-note").hidden = !presented;
+    $("#play-mode-note").textContent = presented ? "Audience mode — discuss each guess together. The leader enters answers; there are no scores, lives, or turn timer." : "";
+    $("#turnbar").hidden = presented;
     renderSource(s, finished);
     renderHints(s, me);
 
     // Turn banner
     const turn = $("#turn-text");
     turn.classList.toggle("mine", isMyTurn);
-    if (finished) turn.textContent = "Game over";
+    if (presented) turn.textContent = finished ? "Audience game over" : "The audience is guessing together";
+    else if (finished) turn.textContent = "Game over";
     else if (isMyTurn) turn.textContent = "Your turn";
     else if (cur && !cur.connected) turn.textContent = `${cur.name} is away`;
     else if (cur) turn.textContent = `${cur.name}'s turn`;
     else turn.textContent = "";
+    if (leaderControlled && !finished && cur) turn.textContent = `Enter a guess for ${cur.name}`;
     if (s.phase === "playing" && !s.deadline && s.config.timerEnabled && cur) turn.textContent += " (paused until players reconnect)";
 
-    if (isMyTurn && lastTurnPid !== pid) {
+    if (isMyTurn && lastTurnPid !== s.turnPid) {
       navigator.vibrate?.(60);
       $("#guess").focus({ preventScroll: true });
       resetSignals();
@@ -450,12 +582,12 @@
           const mine = myReports.has(`r${a.rank}`);
           const flagged = a.reports ? `<span class="reported">Flagged x${a.reports}</span>` : "";
           const flag = `<button type="button" class="flag" data-rank="${a.rank}" data-answer="${esc(a.answer)}"${mine ? " disabled" : ""}>${mine ? "Reported" : "Report"}</button>`;
-          const lead = f ? `Found by ${esc(by ? by.name : "someone")}` : "Missed";
+          const lead = f ? presented ? "Found by the audience" : `Found by ${esc(by ? by.name : "someone")}` : "Missed";
           sub = `<span class="sub">${lead}${a.detail ? `, ${esc(a.detail)}` : ""}${flagged}${flag}</span>`;
         } else if (a.hint) {
           hint = `<span class="plate-hint">Hint: ${esc(a.hint)}</span>`;
         }
-        return `<li class="${cls}"><span class="bulb">${a.rank}</span><span class="plate-body">${revealed ? `<span class="ans">${esc(a.answer)}</span>${sub}` : hint}</span><span class="pts">${f ? `+${f.points}${bonus ? `<small>${esc(bonus)}</small>` : ""}` : ""}</span></li>`;
+        return `<li class="${cls}"><span class="bulb">${a.rank}</span><span class="plate-body">${revealed ? `<span class="ans">${esc(a.answer)}</span>${sub}` : hint}</span><span class="pts">${f && !presented ? `+${f.points}${bonus ? `<small>${esc(bonus)}</small>` : ""}` : ""}</span></li>`;
       })
       .join("");
 
@@ -474,7 +606,8 @@
       for (let i = 0; i < s.config.lives; i++) h += `<svg class="heart ${i < p.lives ? "" : "lost"}"><use href="#i-heart"/></svg>`;
       return `<span class="hearts" aria-label="${p.lives} lives">${h}</span>`;
     };
-    $("#players").innerHTML = s.players
+    $("#players").hidden = presented;
+    $("#players").innerHTML = s.players.filter((p) => p.active !== false)
       .map((p) => {
         const cls = ["player", p.id === s.turnPid ? "turn" : "", p.eliminated ? "out" : ""].join(" ");
         const status = p.eliminated ? "Out" : !p.connected ? "Away" : p.streak >= 2 ? `${p.streak} in a row` : "";
@@ -485,7 +618,9 @@
     // Feed + shake on new misses
     const log = s.log;
     const newest = log.length ? log[log.length - 1].id : 0;
-    if (lastLogId !== null && log.some((l) => l.id > lastLogId && (l.kind === "wrong" || l.kind === "timeout"))) {
+    const newEntries = lastLogId === null ? [] : log.filter((l) => l.id > lastLogId);
+    if (newEntries.some((l) => l.kind === "correct")) playCorrectSound();
+    if (newEntries.some((l) => l.kind === "wrong" || l.kind === "timeout")) {
       const w = $("#board-wrap");
       w.classList.remove("shake");
       void w.offsetWidth;
@@ -496,21 +631,23 @@
 
     // Guess bar
     const input = $("#guess");
-    const canGuess = isMyTurn;
+    const canGuess = isMyTurn && (s.playMode === "network" || isController);
     input.disabled = !canGuess;
     $("#btn-guess").disabled = !canGuess;
     $("#guess-form").dataset.state = canGuess ? "mine" : "wait";
-    input.placeholder = finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
+    input.placeholder = presented && !finished ? "Take a guess" : leaderControlled && !finished ? `Guess for ${cur ? cur.name : "the current player"}` : finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
     $("#guess-form").hidden = finished;
 
     // Results
     $("#results").hidden = !finished;
     if (finished) {
-      const sorted = [...s.players].sort((a, b) => b.score - a.score);
-      const winners = s.players.filter((p) => s.winners.includes(p.id));
+      const activePlayers = s.players.filter((p) => p.active !== false);
+      const sorted = [...activePlayers].sort((a, b) => b.score - a.score);
+      const winners = activePlayers.filter((p) => s.winners.includes(p.id));
       let title;
-      if (!winners.length) title = "Nobody scored this round";
-      else if (s.players.length === 1) title = `You scored ${winners[0].score} points`;
+      if (presented) title = "The audience found all 10 answers!";
+      else if (!winners.length) title = "Nobody scored this round";
+      else if (activePlayers.length === 1) title = winners[0].id === pid ? `You scored ${winners[0].score} points` : `${winners[0].name} scored ${winners[0].score} points`;
       else if (winners.length === 1) title = `${winners[0].name} wins with ${winners[0].score} points`;
       else title = `${winners.map((w) => w.name).join(" and ")} tie on ${winners[0].score} points`;
       let ratingLine = "";
@@ -534,6 +671,7 @@
       rl.hidden = !ratingLine;
       rl.textContent = ratingLine;
       let place = 0, prev = null;
+      $("#res-list").hidden = presented;
       $("#res-list").innerHTML = sorted
         .map((p, i) => {
           if (p.score !== prev) place = i + 1;
@@ -543,7 +681,7 @@
         .join("");
       const isHost = s.hostId === pid;
       $("#btn-rematch").hidden = !!s.ranked || !isHost;
-      $("#res-wait").hidden = !!s.ranked || isHost || !me;
+      $("#res-wait").hidden = presented || !!s.ranked || isHost || !me;
       $("#btn-ranked-back").hidden = !s.ranked;
     }
     tick();
@@ -571,7 +709,16 @@
       bar.classList.add("no-clock");
     }
   }
-  setInterval(tick, 100);
+  function updateGameTicker() {
+    const active = !document.hidden && code && state?.phase === "playing" && state.deadline && !$("#screen-game").hidden;
+    if (active && !gameTicker) {
+      tick();
+      gameTicker = setInterval(tick, 100);
+    } else if (!active && gameTicker) {
+      clearInterval(gameTicker);
+      gameTicker = null;
+    }
+  }
 
   // ------------------------------------------------------------------ reports
   function openReport(ctx) {
@@ -648,6 +795,11 @@
     render();
     pushConfig({ timerEnabled: e.target.checked });
   });
+  $("#prefer-latest-year").addEventListener("change", (e) => {
+    setPending("preferLatestYear", e.target.checked);
+    render();
+    pushConfig({ preferLatestYear: e.target.checked });
+  });
   $("#timer-sec").addEventListener("input", (e) => {
     const value = Number(e.target.value);
     setPending("seconds", value);
@@ -658,9 +810,10 @@
   for (const b of $$(".seg")) {
     b.addEventListener("click", () => {
       if (b.disabled) return;
-      setPending("difficulty", b.dataset.diff);
-      render();
-      pushConfig({ difficulty: b.dataset.diff });
+      suggestionDifficulty = b.dataset.diff;
+      if (selectedSuggestionDifficulty) selectedSuggestionDifficulty = suggestionDifficulty;
+      for (const button of $$(".seg")) button.setAttribute("aria-checked", String(button === b));
+      renderChips();
     });
   }
 
@@ -668,6 +821,7 @@
     const b = e.target.closest(".chip");
     if (!b) return;
     selectedClassic = null;
+    selectedSuggestionDifficulty = suggestionDifficulty;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     $("#topic").value = b.textContent;
     $("#topic").focus();
@@ -676,27 +830,156 @@
     const b = e.target.closest(".chip");
     if (!b) return;
     selectedClassic = b.dataset.id;
+    selectedSuggestionDifficulty = null;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", String(c === b));
     $("#topic").value = b.dataset.title;
   });
   $("#topic").addEventListener("input", () => {
+    selectedSuggestionDifficulty = null;
     const chosen = selectedClassic && $(`#classics .chip[data-id="${selectedClassic}"]`);
     if (!chosen || chosen.dataset.title !== $("#topic").value.trim()) {
       selectedClassic = null;
       for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     }
   });
+  $("#list-url").addEventListener("input", () => {
+    selectedSuggestionDifficulty = null;
+    if ($("#list-url").value.trim()) {
+      selectedClassic = null;
+      for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    }
+  });
   $("#btn-surprise").addEventListener("click", () => {
     selectedClassic = null;
+    selectedSuggestionDifficulty = suggestionDifficulty;
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     $("#topic").value = pick(1)[0];
     renderChips();
   });
+  $("#btn-custom-list").addEventListener("click", () => {
+    customListMode = !customListMode;
+    if (customListMode && playMode === "network") playMode = "automatic";
+    selectedClassic = null;
+    selectedSuggestionDifficulty = null;
+    $("#list-url").value = "";
+    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
+    render();
+  });
+  for (const input of $$('input[name="play-mode"]')) {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      playMode = input.value;
+      render();
+    });
+  }
+  $("#score-player-list").addEventListener("change", (e) => {
+    const checkbox = e.target.closest("[data-score-player]");
+    if (!checkbox) return;
+    scoreRosterEdited = true;
+    if (checkbox.checked) assignedPlayerIds.add(checkbox.dataset.scorePlayer);
+    else assignedPlayerIds.delete(checkbox.dataset.scorePlayer);
+    if (state) render();
+  });
+  $("#score-player-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#score-player-name");
+    const name = input.value.trim().slice(0, 16);
+    if (!name) return input.focus();
+    const rosterNames = [
+      ...(state?.players ?? []).filter((p) => p.id === pid).map((p) => p.name),
+      ...[...(state?.players ?? [])].filter((p) => assignedPlayerIds.has(p.id)).map((p) => p.name),
+      ...localScorePlayers,
+    ];
+    if (rosterNames.some((playerName) => playerName.toLowerCase() === name.toLowerCase())) {
+      toast("Each scored player needs a different name.", "error");
+      return input.focus();
+    }
+    if (rosterNames.length >= 8) {
+      toast("A scored game can have up to 8 players.", "error");
+      return input.focus();
+    }
+    localScorePlayers.push(name);
+    scoreRosterEdited = true;
+    input.value = "";
+    if (state) render();
+    input.focus();
+  });
+  $("#local-score-players").addEventListener("click", (e) => {
+    const button = e.target.closest("[data-remove-local-player]");
+    if (!button) return;
+    localScorePlayers.splice(Number(button.dataset.removeLocalPlayer), 1);
+    scoreRosterEdited = true;
+    if (state) render();
+  });
+  $("#score-setup-cancel").addEventListener("click", () => {
+    scoreSetupOpen = false;
+    if (state) render();
+  });
+  $("#score-roster-details").addEventListener("toggle", () => {
+    if (state) render();
+    else renderSoloSetupChoice();
+  });
+  $("#solo-setup").addEventListener("click", () => {
+    $("#score-roster-details").open = false;
+    if (state) render();
+    else renderSoloSetupChoice();
+  });
+  $("#solo-setup").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    $("#solo-setup").click();
+  });
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
-    if (selectedClassic) return send({ t: "start", classic: selectedClassic });
-    if (topic.length < 3) { toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error"); return $("#topic").focus(); }
-    send({ t: "start", topic });
+    if (customListMode) {
+      const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
+      if (topic.length < 3) { toast("Enter a category or list title first.", "error"); return $("#topic").focus(); }
+      if (answers.some((answer) => !answer)) {
+        toast("Enter all 10 answers in rank order.", "error");
+        return $$("[data-manual-answer]").find((input) => !input.value.trim())?.focus();
+      }
+    }
+    else if (!$("#list-url").value.trim() && !selectedClassic && topic.length < 3) {
+      toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error");
+      return $("#topic").focus();
+    }
+
+    const connected = state?.players.filter((p) => p.connected) ?? [];
+    playMode = connected.length > 1 ? "network" : "automatic";
+    scoreRosterEdited = false;
+    assignedPlayerIds = new Set(connected.filter((p) => p.id !== pid).map((p) => p.id));
+    $("#score-roster-details").open = false;
+    scoreSetupOpen = true;
+    render();
+  });
+  $("#score-setup-start").addEventListener("click", () => {
+    if (!state) return;
+    const connected = state.players.filter((p) => p.connected);
+    const additionalIds = [...assignedPlayerIds].filter((id) => id !== pid && connected.some((p) => p.id === id));
+    const hasExtraPlayers = $("#score-roster-details").open && (additionalIds.length > 0 || localScorePlayers.length > 0);
+    const selectedMode = connected.length > 1
+      ? "network"
+      : hasExtraPlayers ? "leader" : "presented";
+    const payload = {
+      t: "start",
+      playMode: selectedMode,
+      ...(selectedMode === "leader" ? { assignedIds: additionalIds, extraPlayers: localScorePlayers } : {}),
+    };
+    if (customListMode) {
+      const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
+      payload.manual = { title: $("#topic").value.trim(), answers };
+    } else {
+      const listUrl = $("#list-url").value.trim();
+      if (listUrl) payload.listUrl = listUrl;
+      else if (selectedClassic) payload.classic = selectedClassic;
+      else {
+        payload.topic = $("#topic").value.trim();
+        if (selectedSuggestionDifficulty) payload.difficulty = selectedSuggestionDifficulty;
+      }
+    }
+    scoreSetupOpen = false;
+    $("#score-setup-modal").hidden = true;
+    send(payload);
   });
   $("#topic").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btn-start").click(); });
 
@@ -707,6 +990,10 @@
   });
 
   $("#btn-hint").addEventListener("click", () => send({ t: "hint" }));
+  $("#lobby-players").addEventListener("click", (e) => {
+    const button = e.target.closest("[data-promote]");
+    if (button) send({ t: "promote", targetId: button.dataset.promote });
+  });
   $("#btn-source").addEventListener("click", () => {
     showSource = !showSource;
     if (showSource && state && state.phase === "playing") send({ t: "source" });
@@ -752,6 +1039,7 @@
     const input = $("#guess");
     const text = input.value.trim();
     if (!text || input.disabled) return;
+    prepareCorrectSound();
     send({ t: "guess", text, ...(state && state.ranked ? { sig: collectSignals() } : {}) });
     input.value = "";
   });
@@ -809,7 +1097,7 @@
     show("player");
     window.dispatchEvent(new Event("tf:player"));
   }
-  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
+  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), prepareCorrectSound, playCorrectSound, avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
   function route() {
     if (location.hash.startsWith("#/daily")) openDaily();
     else if (location.hash.startsWith("#/ranked")) openRanked();
@@ -822,6 +1110,7 @@
   // ------------------------------------------------------------------ boot
   buildSample();
   renderChips();
+  renderCustomAnswerFields();
   $("#name").value = localStorage.getItem("tf_name") || "";
   const linked = new URLSearchParams(location.search).get("room");
   const saved = sessionStorage.getItem("tf_room");

@@ -8,6 +8,14 @@ const peaks = [A("Mount Everest"), A("K2"), A("Nanga Parbat"), A("Great Bear Lak
 console.log("exact and typos");
 ok(kind("mount everest", peaks) === "hit:0:exact", "exact (case-insensitive) is flagged exact");
 ok(kind("Mount Evrest", peaks) === "hit:0:close", "a typo is accepted but flagged close");
+ok(kind("Great Bear Lakes", peaks) === "hit:3:exact", "a plural guess matches the singular list answer");
+ok(kind("Mount Everests", peaks) === "hit:0:exact", "plural matching works across multi-word answers");
+ok(kind("knives", [A("Knife")]) === "hit:0:exact", "irregular ves plurals match an -fe singular");
+ok(kind("wolves", [A("Wolf")]) === "hit:0:exact", "irregular ves plurals match an -f singular");
+ok(kind("buses", [A("Bus")]) === "hit:0:exact", "regular -es plurals match");
+ok(kind("cities", [A("City")]) === "hit:0:exact", "consonant-y plurals match");
+ok(kind("children", [A("Child")]) === "hit:0:exact", "common irregular plurals match");
+ok(kind("knives", [A("Knife"), A("Knif")]) === "miss", "ambiguous singular forms never guess between two answers");
 ok(kind("k2", peaks) === "hit:1:exact", "short answers need to be exact");
 ok(kind("k3", peaks) === "miss", "...and don't accept near-misses");
 

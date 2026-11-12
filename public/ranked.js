@@ -5,9 +5,11 @@
   const { $, $$, esc, toast } = T;
 
   let pollTimer = null;
+  let pollDelay = 1500;
   let waitingSince = 0;
   let enteringMatch = false;
   let dailyTab = "today";
+  let friendsRefreshTimer = null;
 
   async function api(path, body) {
     const opts = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -44,6 +46,7 @@
   // ------------------------------------------------------------------ page flow
   async function refresh() {
     stopPolling();
+    clearTimeout(friendsRefreshTimer);
     enteringMatch = false;
     const authError = new URL(location.href).searchParams.get("autherror");
     if (authError) {
@@ -68,10 +71,9 @@
   }
 
   async function loadHub() {
-    const [me, hist, ladder, daily, friends] = await Promise.all([
+    const [me, hist, daily, friends] = await Promise.all([
       api("/api/ranked/me"),
       api("/api/ranked/history"),
-      api("/api/ranked/ladder"),
       api("/api/daily/state"),
       api("/api/friends"),
     ]);
@@ -82,7 +84,9 @@
     renderRecent(hist);
     renderDaily(daily);
     renderFriends(friends);
+    scheduleFriendsRefresh();
     loadDailyBoard();
+    const ladder = me.ladder || {};
     $("#rk-ladder-body").innerHTML = ladder.rows ? ladderHtml(ladder.rows.slice(0, 20), ladder.me) : '<p class="hint">Couldn\'t load the ladder just now.</p>';
     if (me.status === "matched") return goToMatch(me);
     if (me.status === "waiting") return showWaiting(me);
@@ -110,14 +114,30 @@
     return stats.map(([n, l]) => `<div class="stat"><span class="stat-n">${esc(n)}</span><span class="stat-l">${l}</span></div>`).join("");
   }
 
+  let trendChartId = 0;
   function trendSvg(values) {
     if (values.length < 2) return '<p class="hint">Play a few matches to see a rating trend.</p>';
-    const W = 240, H = 64, pad = 8;
-    const lo = Math.min(...values), hi = Math.max(...values);
-    const span = Math.max(1, hi - lo);
-    const pts = values.map((v, i) => [pad + (i / (values.length - 1)) * (W - pad * 2), H - pad - ((v - lo) / span) * (H - pad * 2)]);
+    const data = values.map(Number).filter(Number.isFinite);
+    if (data.length < 2) return '<p class="hint">Play a few matches to see a rating trend.</p>';
+    const W = 360, H = 132, left = 42, right = 12, top = 12, bottom = 25;
+    const lo = Math.min(...data), hi = Math.max(...data);
+    const margin = Math.max(12, (hi - lo) * 0.18);
+    const min = lo - margin, max = hi + margin, span = max - min;
+    const x = (i) => left + (i / (data.length - 1)) * (W - left - right);
+    const y = (v) => top + ((max - v) / span) * (H - top - bottom);
+    const pts = data.map((v, i) => [x(i), y(v)]);
     const last = pts[pts.length - 1];
-    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Rating over the last ${values.length - 1} games, from ${values[0]} to ${values[values.length - 1]}"><polyline class="line" points="${pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join(" ")}"/><circle class="dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4"/></svg>`;
+    const coordinates = pts.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`);
+    const line = pts.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+    const area = `${line} L${last[0].toFixed(1)},${(H - bottom).toFixed(1)} L${left},${(H - bottom).toFixed(1)} Z`;
+    const gradientId = `rating-fill-${++trendChartId}`;
+    const guides = [0, 0.5, 1].map((fraction) => {
+      const gy = top + fraction * (H - top - bottom);
+      const value = Math.round(max - fraction * span);
+      return `<line class="chart-grid" x1="${left}" y1="${gy}" x2="${W - right}" y2="${gy}"/><text class="chart-label" x="${left - 7}" y="${gy + 3}" text-anchor="end">${value}</text>`;
+    }).join("");
+    const points = pts.map(([px, py], i) => `<circle class="chart-point${i === pts.length - 1 ? " current" : ""}" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${i === pts.length - 1 ? 4 : 2.4}"/>`).join("");
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating trend across ${data.length - 1} ranked games, from ${data[0]} to ${data[data.length - 1]}"><defs><linearGradient id="${gradientId}" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="var(--bulb)" stop-opacity=".28"/><stop offset="100%" stop-color="var(--bulb)" stop-opacity="0"/></linearGradient></defs>${guides}<path class="chart-area" fill="url(#${gradientId})" d="${area}"/><polyline class="line chart-line" points="${coordinates.join(" ")}"/>${points}<text class="chart-label chart-start" x="${left}" y="${H - 5}">Earlier</text><text class="chart-label chart-end" x="${W - right}" y="${H - 5}" text-anchor="end">Recent</text></svg>`;
   }
   T.statsHtml = statsHtml;
   T.trendSvg = trendSvg;
@@ -136,7 +156,7 @@
       ? rows
           .map(
             (r) =>
-              `<div class="recent-row"><span>${T.avatar(r.opponent.avatar, 32)}</span><span class="who">${plink(r.opponent.name)}<span class="rating">${r.opponent.rating}</span></span><span class="badge ${r.result}">${r.result === "win" ? "WIN" : r.result === "loss" ? "LOSS" : "DRAW"}</span><span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)}. ${reasonText(r)}, now ${r.ratingAfter}, ${ago(r.time)}</span></div>`,
+              `<div class="recent-row"><span>${T.avatar(r.opponent.avatar, 32)}</span><span class="who">${plink(r.opponent.name)}<span class="rating">${r.opponent.rating}</span></span><span class="badge ${r.result}">${r.result === "win" ? "WIN" : r.result === "loss" ? "LOSS" : "DRAW"}</span><span class="delta ${r.delta > 0 ? "pos" : r.delta < 0 ? "neg" : ""}">${r.delta > 0 ? "+" : ""}${r.delta}</span><span class="meta">${esc(r.title)}. ${reasonText(r)}, now ${r.ratingAfter}</span><span class="recent-time">${ago(r.time)}</span></div>`,
           )
           .join("")
       : '<p class="hint">No ranked games yet. Find a match to get your first rating.</p>';
@@ -145,10 +165,25 @@
   // ------------------------------------------------------------------ friends
   function renderFriends(f) {
     if (!f || f.error) return;
+    f.friends ||= []; f.incoming ||= []; f.outgoing ||= [];
+    f.incomingInvites ||= []; f.outgoingInvites ||= [];
     $("#fr-count").textContent = f.friends.length ? `(${f.friends.length})` : "";
     const row = (p, hint, actions) =>
       `<li class="fr-row"><span>${T.avatar(p.avatar, 32)}</span><span class="fr-name">${plink(p.name)}<span class="hint">${p.rating}${hint ? `, ${esc(hint)}` : ""}</span></span><span class="fr-actions">${actions}</span></li>`;
     const btn = (act, name, label, primary) => `<button class="btn btn-small${primary ? " btn-primary" : ""}" type="button" data-fr="${act}" data-name="${esc(name)}">${label}</button>`;
+    const gameInvite = (invite) => {
+      const mode = invite.mode === "rated" ? "Ranked" : "For fun";
+      const actions = invite.status === "accepted"
+        ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="join" data-code="${esc(invite.code)}" data-name="${esc(invite.name)}">Join ${mode} game</button>`
+        : invite.direction === "incoming"
+          ? `<button class="btn btn-small btn-primary" type="button" data-invite-action="accept" data-id="${esc(invite.id)}">Accept</button>${btn("invite-decline", invite.id, "Decline", false)}`
+          : btn("invite-cancel", invite.id, "Cancel", false);
+      return `<li class="fr-row game-invite-row"><span class="invite-mode">${mode}</span><span class="fr-name"><strong>${plink(invite.name)}</strong><span class="hint">${invite.status === "accepted" ? "Game ready" : invite.direction === "incoming" ? "invited you to play" : "waiting for a reply"}</span></span><span class="fr-actions">${actions}</span></li>`;
+    };
+    const gameInvites = [...f.incomingInvites, ...f.outgoingInvites];
+    $("#fr-game-invites").hidden = !gameInvites.length;
+    $("#fr-game-incoming").innerHTML = f.incomingInvites.map(gameInvite).join("");
+    $("#fr-game-outgoing").innerHTML = f.outgoingInvites.map(gameInvite).join("");
     $("#fr-requests").hidden = !f.incoming.length;
     $("#fr-incoming").innerHTML = f.incoming.map((p) => row(p, "wants to be friends", btn("accept", p.name, "Accept", true) + btn("decline", p.name, "Decline"))).join("");
     $("#fr-list").innerHTML = f.friends.length
@@ -160,6 +195,32 @@
 
   async function reloadFriends() {
     renderFriends(await api("/api/friends"));
+  }
+
+  function scheduleFriendsRefresh() {
+    clearTimeout(friendsRefreshTimer);
+    friendsRefreshTimer = setTimeout(async () => {
+      if ($("#screen-ranked").hidden) return;
+      await reloadFriends();
+      await joinAcceptedFriendGame();
+      scheduleFriendsRefresh();
+    }, 7000);
+  }
+
+  async function joinAcceptedFriendGame() {
+    if (enteringMatch || $("#screen-ranked").hidden) return;
+    const f = await api("/api/friends");
+    const invite = f.outgoingInvites?.find((item) => item.mode === "casual" && item.status === "accepted");
+    if (invite) joinFriendGame(invite.code, invite.name);
+  }
+
+  function joinFriendGame(code, name) {
+    if (!/^[A-Z0-9]{5}$/.test(code || "")) return toast("That game room is no longer available.", "error");
+    enteringMatch = true;
+    const ownName = $("#rk-name").textContent.trim();
+    if (ownName) localStorage.setItem("tf_name", ownName);
+    toast(`Joining ${name}'s game.`);
+    T.enterRoom(code);
   }
 
   $("#fr-add-form").addEventListener("submit", async (e) => {
@@ -175,12 +236,25 @@
 
   $(".friends-card").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-fr]");
+    const gameButton = e.target.closest("[data-invite-action]");
+    if (gameButton?.dataset.inviteAction === "join") return joinFriendGame(gameButton.dataset.code, gameButton.dataset.name);
+    if (gameButton) {
+      gameButton.disabled = true;
+      const action = gameButton.dataset.inviteAction;
+      const r = await api(`/api/ranked/invites/${action}`, { id: gameButton.dataset.id });
+      if (r.error) toast(r.error, "error");
+      else if (action === "accept") return joinFriendGame(r.code, "your friend's");
+      reloadFriends();
+      return;
+    }
     if (!b) return;
     b.disabled = true;
-    const r = await api(`/api/friends/${b.dataset.fr}`, { name: b.dataset.name });
+    const action = b.dataset.fr.startsWith("invite-") ? b.dataset.fr.slice("invite-".length) : b.dataset.fr;
+    const isInviteAction = b.dataset.fr.startsWith("invite-");
+    const r = await api(isInviteAction ? `/api/ranked/invites/${action}` : `/api/friends/${action}`, isInviteAction ? { id: b.dataset.name } : { name: b.dataset.name });
     if (r.error) toast(r.error, "error");
-    else if (b.dataset.fr === "accept") toast(`You're now friends with ${b.dataset.name}.`);
-    reloadFriends();
+    else if (action === "accept") toast(`You're now friends with ${b.dataset.name}.`);
+    await reloadFriends();
   });
 
   // ------------------------------------------------------------------ daily challenge card
@@ -236,7 +310,10 @@
     $("#rk-wait").hidden = false;
     waitingSince = Date.now() - (s.waitedMs || 0);
     updateWaitText(s);
-    if (!pollTimer) pollTimer = setInterval(poll, 1500);
+    if (!pollTimer) {
+      pollDelay = 1500;
+      schedulePoll();
+    }
   }
 
   function updateWaitText(s) {
@@ -246,8 +323,16 @@
   }
 
   function stopPolling() {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
+  }
+
+  function schedulePoll() {
+    if (pollTimer || $("#screen-ranked").hidden) return;
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      void poll();
+    }, pollDelay);
   }
 
   async function poll() {
@@ -255,11 +340,14 @@
     const s = await api("/api/ranked/status");
     if (s.httpStatus === 401) return refresh();
     if (s.status === "matched") return goToMatch(s);
-    if (s.status === "waiting") return updateWaitText(s);
+    if (s.status === "waiting") updateWaitText(s);
     if (s.status === "idle") {
       showIdle();
       toast("You were taken out of the queue. Join again to keep looking.");
+      return;
     }
+    pollDelay = Math.min(pollDelay + 1000, 5000);
+    schedulePoll();
   }
 
   function goToMatch(s) {

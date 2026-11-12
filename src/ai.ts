@@ -38,8 +38,8 @@ export const DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const MAX_TOKENS = 1200;
 const TIMEOUT_MS = 45_000;
 
-export const cacheKey = (topic: string, difficulty: Difficulty): string =>
-  `${difficulty}:${normalize(topic).slice(0, 120)}`;
+export const cacheKey = (topic: string, difficulty: Difficulty, preferLatestYear = false): string =>
+  `${difficulty}:${normalize(topic).slice(0, 120)}${preferLatestYear ? `:latest-year:${new Date().getUTCFullYear()}` : ""}`;
 
 const SYSTEM = `You write the answer lists for Tenfold, a family-friendly top-ten guessing game. Players see a category and must guess its ten ranked answers.
 
@@ -288,9 +288,12 @@ function callProvider(env: Env, system: string, user: string): Promise<unknown> 
  * Builds a ranked top ten. Every model request, including a retry, is reserved through
  * `hooks` first, so the daily/IP/room caps always reflect real usage.
  */
-export async function generateTopTen(env: Env, topic: string, difficulty: Difficulty, hooks: Hooks): Promise<TopTen> {
-  const system = `${SYSTEM}\n\n${DIFFICULTY_NOTE[difficulty]}`;
-  const user = `Topic: ${topic}\nDifficulty: ${difficulty.toUpperCase()}`;
+export async function generateTopTen(env: Env, topic: string, difficulty: Difficulty, hooks: Hooks, preferLatestYear = false): Promise<TopTen> {
+  const yearNote = preferLatestYear
+    ? `\n\nYear preference: Use the most recent year for which complete, reliable data exists (prefer ${new Date().getUTCFullYear()} when available, otherwise the latest completed year). State that year in the basis.`
+    : "";
+  const system = `${SYSTEM}\n\n${DIFFICULTY_NOTE[difficulty]}${yearNote}`;
+  const user = `Topic: ${topic}\nDifficulty: ${difficulty.toUpperCase()}${preferLatestYear ? `\nPrefer the latest complete yearly data, including ${new Date().getUTCFullYear()} when available.` : ""}`;
 
   let last: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
