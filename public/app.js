@@ -66,6 +66,13 @@
   let lastLogId = null;
   let audioContext = null;
   let configTimer = null;
+  const soundFx = {
+    correct: new Audio("/correct.wav"),
+    wrong: new Audio("/incorrect.mp3"),
+  };
+  for (const sound of Object.values(soundFx)) {
+    sound.preload = "auto";
+  }
   let selectedClassic = null;
   let classicsKey = "";
   let budgetAt = 0;
@@ -85,23 +92,17 @@
   }
 
   function playCorrectSound() {
-    const context = prepareCorrectSound();
-    if (!context) return;
-    const start = context.currentTime;
-    [880, 1174].forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const volume = context.createGain();
-      const at = start + index * 0.075;
-      oscillator.type = "sine";
-      oscillator.frequency.value = frequency;
-      volume.gain.setValueAtTime(0.0001, at);
-      volume.gain.exponentialRampToValueAtTime(0.18, at + 0.012);
-      volume.gain.exponentialRampToValueAtTime(0.0001, at + 0.24);
-      oscillator.connect(volume);
-      volume.connect(context.destination);
-      oscillator.start(at);
-      oscillator.stop(at + 0.25);
-    });
+    const sound = soundFx.correct;
+    if (!sound) return;
+    sound.currentTime = 0;
+    void sound.play().catch(() => {});
+  }
+
+  function playWrongSound() {
+    const sound = soundFx.wrong;
+    if (!sound) return;
+    sound.currentTime = 0;
+    void sound.play().catch(() => {});
   }
 
   // Local edits shown immediately; the server's echo confirms them (or they expire).
@@ -621,6 +622,7 @@
     const newEntries = lastLogId === null ? [] : log.filter((l) => l.id > lastLogId);
     if (newEntries.some((l) => l.kind === "correct")) playCorrectSound();
     if (newEntries.some((l) => l.kind === "wrong" || l.kind === "timeout")) {
+      playWrongSound();
       const w = $("#board-wrap");
       w.classList.remove("shake");
       void w.offsetWidth;
@@ -1097,7 +1099,7 @@
     show("player");
     window.dispatchEvent(new Event("tf:player"));
   }
-  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), prepareCorrectSound, playCorrectSound, avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
+  window.Tenfold = { $, $$, esc, show, toast, openDaily, openRanked, openMe, openPlayer, enterRoom: (c) => enterRoom(c), prepareCorrectSound, playCorrectSound, playWrongSound, avatar: avatarSvg, avatarParts: { hues: AV_HUES, icons: AV_ICONS } };
   function route() {
     if (location.hash.startsWith("#/daily")) openDaily();
     else if (location.hash.startsWith("#/ranked")) openRanked();
