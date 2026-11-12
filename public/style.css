@@ -65,7 +65,7 @@ button, input { font: inherit; color: inherit; }
 }
 .brand-name { font: 800 1.5rem/1 var(--display); font-stretch: 75%; letter-spacing: 0.01em; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
-.topbar-right .bmc-btn-container { max-width: 100%; }
+.topbar-right .bmc-btn-container { max-width: 100%; margin-left: auto; flex: 0 0 auto; }
 .topbar-right .bmc-btn {
   display: inline-flex !important;
   align-items: center !important;
