@@ -91,7 +91,16 @@ button, input { font: inherit; color: inherit; }
   .brand-name { font-size: 1.3rem; }
   .mode-pill a { padding: 5px 7px; font-size: 0.9rem; }
 }
+.topbar-game { position: relative; }
+.topbar-game .topbar-right {
+  position: absolute;
+  top: 50%;
+  right: clamp(16px, 4vw, 40px);
+  transform: translateY(-50%);
+  justify-self: auto;
+}
 @media (max-width: 640px) {
+  .topbar-game .topbar-right { right: 12px; }
   .topbar-game .topbar-right .bmc-btn {
     position: relative;
     width: 38px !important;
