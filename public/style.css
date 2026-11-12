@@ -65,6 +65,24 @@ button, input { font: inherit; color: inherit; }
 }
 .brand-name { font: 800 1.5rem/1 var(--display); font-stretch: 75%; letter-spacing: 0.01em; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-right .bmc-btn-container,
+.topbar-right .bmc-btn,
+.topbar-right iframe,
+.topbar-right a.bmc-btn { display: inline-flex !important; align-items: center; justify-content: center; transform: scale(0.8); transform-origin: right center; }
+.topbar-right .bmc-btn-container { max-width: 100%; }
+.topbar-right .bmc-btn,
+.topbar-right a.bmc-btn {
+  font-size: 12px !important;
+  line-height: 1 !important;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .topbar-right .bmc-btn-container,
+  .topbar-right .bmc-btn,
+  .topbar-right iframe,
+  .topbar-right a.bmc-btn { transform: scale(0.72); }
+  .topbar-right { gap: 6px; }
+}
 .conn { color: var(--stage-deep); background: var(--bulb); padding: 4px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 700; }
 
 main { padding: 0 clamp(16px, 4vw, 40px) 40px; max-width: 1180px; margin: 0 auto; }
