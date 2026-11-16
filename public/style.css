@@ -154,10 +154,6 @@ input[type="text"], input:not([type]), input[type="search"] {
   width: 100%; background: var(--stage-deep); border: 2px solid var(--line); border-radius: 10px;
   padding: 12px 14px; font-size: 1rem; /* 16px+ stops iOS zooming on focus */
 }
-input[type="url"] {
-  width: 100%; min-width: 0; background: var(--stage-deep); border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 10px; padding: 12px 14px; font-size: 1rem; color: var(--chalk);
-}
 input::placeholder { color: #7f89d6; }
 input:focus { border-color: var(--bulb); outline: none; }
 input:disabled { opacity: 0.6; }

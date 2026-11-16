@@ -393,14 +393,11 @@
         </div>
 
         <div class="panel topic" id="topic-panel">
-          <h2 class="h2">Topic</h2>
+          <h2 class="h2">Choose a list</h2>
           <label class="field">
-            <span id="topic-label" class="field-label">What should the top ten be about?</span>
-            <input id="topic" maxlength="120" placeholder="e.g. Best-selling video game consoles of all time">
-          </label>
-          <label class="field">
-            <span class="field-label">Or import a ranked list from a webpage</span>
-            <input id="list-url" type="url" maxlength="2048" placeholder="https://example.com/top-ten">
+            <span id="topic-label" class="field-label">Enter a topic or paste a webpage link</span>
+            <input id="topic" maxlength="2048" placeholder="e.g. Best-selling video games or https://example.com/top-ten" aria-describedby="topic-help">
+            <span id="topic-help" class="hint">A webpage link imports its ranked list; other text generates a list about that topic.</span>
           </label>
           <button id="btn-custom-list" class="btn btn-small custom-list-toggle" type="button" aria-pressed="false">Enter all 10 answers yourself</button>
           <fieldset id="custom-answers" class="custom-answers" hidden>

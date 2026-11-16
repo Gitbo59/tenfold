@@ -471,12 +471,13 @@
     // Topic: host only.
     $("#topic").disabled = !isHost;
     $("#topic").closest(".field").hidden = !isHost;
-    $("#list-url").closest(".field").hidden = !isHost || customListMode;
     $("#btn-custom-list").hidden = !isHost;
     $("#btn-custom-list").setAttribute("aria-pressed", String(customListMode));
     $("#btn-custom-list").textContent = customListMode ? "Use a suggested, built-in, or imported list" : "Enter all 10 answers yourself";
-    $("#topic-label").textContent = customListMode ? "Category / list title" : "What should the top ten be about?";
-    $("#topic").placeholder = customListMode ? "Enter a category or list title" : "e.g. Best-selling video game consoles of all time";
+    $("#topic-label").textContent = customListMode ? "Category / list title" : "Enter a topic or paste a webpage link";
+    $("#topic").placeholder = customListMode ? "Enter a category or list title" : "e.g. Best-selling video games or https://example.com/top-ten";
+    $("#topic").maxLength = customListMode ? 120 : 2048;
+    $("#topic-help").hidden = customListMode;
     $("#custom-answers").hidden = !isHost || !customListMode;
     $(".topic-tools").hidden = !isHost || customListMode;
     $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
@@ -844,13 +845,6 @@
       for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     }
   });
-  $("#list-url").addEventListener("input", () => {
-    selectedSuggestionDifficulty = null;
-    if ($("#list-url").value.trim()) {
-      selectedClassic = null;
-      for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
-    }
-  });
   $("#btn-surprise").addEventListener("click", () => {
     selectedClassic = null;
     selectedSuggestionDifficulty = suggestionDifficulty;
@@ -863,7 +857,6 @@
     if (customListMode && playMode === "network") playMode = "automatic";
     selectedClassic = null;
     selectedSuggestionDifficulty = null;
-    $("#list-url").value = "";
     for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     render();
   });
@@ -933,6 +926,7 @@
   });
   $("#btn-start").addEventListener("click", () => {
     const topic = $("#topic").value.trim();
+    const listUrl = !customListMode && /^https?:\/\//i.test(topic) ? topic : "";
     if (customListMode) {
       const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
       if (topic.length < 3) { toast("Enter a category or list title first.", "error"); return $("#topic").focus(); }
@@ -941,7 +935,7 @@
         return $$("[data-manual-answer]").find((input) => !input.value.trim())?.focus();
       }
     }
-    else if (!$("#list-url").value.trim() && !selectedClassic && topic.length < 3) {
+    else if (!listUrl && !selectedClassic && topic.length < 3) {
       toast("Enter a topic first, pick a built-in list, or tap Surprise me.", "error");
       return $("#topic").focus();
     }
@@ -976,7 +970,6 @@
       const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
       payload.manual = { title: $("#topic").value.trim(), answers };
     } else {
-      const listUrl = $("#list-url").value.trim();
       if (listUrl) payload.listUrl = listUrl;
       else if (selectedClassic) payload.classic = selectedClassic;
       else {
