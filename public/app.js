@@ -947,7 +947,12 @@
     }
 
     const connected = state?.players.filter((p) => p.connected) ?? [];
-    playMode = connected.length > 1 ? "network" : "automatic";
+    if (connected.length > 1) {
+      scoreSetupOpen = false;
+      $("#score-setup-start").click();
+      return;
+    }
+    playMode = "automatic";
     scoreRosterEdited = false;
     assignedPlayerIds = new Set(connected.filter((p) => p.id !== pid).map((p) => p.id));
     $("#score-roster-details").open = false;
