@@ -955,6 +955,8 @@
   });
   $("#score-setup-start").addEventListener("click", () => {
     if (!state) return;
+    const topic = $("#topic").value.trim();
+    const listUrl = !customListMode && /^https?:\/\//i.test(topic) ? topic : "";
     const connected = state.players.filter((p) => p.connected);
     const additionalIds = [...assignedPlayerIds].filter((id) => id !== pid && connected.some((p) => p.id === id));
     const hasExtraPlayers = $("#score-roster-details").open && (additionalIds.length > 0 || localScorePlayers.length > 0);
@@ -968,12 +970,12 @@
     };
     if (customListMode) {
       const answers = $$("[data-manual-answer]").map((input) => input.value.trim());
-      payload.manual = { title: $("#topic").value.trim(), answers };
+      payload.manual = { title: topic, answers };
     } else {
       if (listUrl) payload.listUrl = listUrl;
       else if (selectedClassic) payload.classic = selectedClassic;
       else {
-        payload.topic = $("#topic").value.trim();
+        payload.topic = topic;
         if (selectedSuggestionDifficulty) payload.difficulty = selectedSuggestionDifficulty;
       }
     }
