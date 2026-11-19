@@ -40,7 +40,7 @@ ok($("#score-setup-modal").hidden, "player setup stays closed until Start game i
 ok($$("#classics .chip").length === 6, "six built-in lists offered");
 ok(!$("#list-url") && $("#topic").type === "text" && $("#topic").maxLength === 2048 && /webpage link/i.test($("#topic-label").textContent), "one text field accepts topics and webpage links");
 ok($("#topic-help").textContent.includes("imports its ranked list") && $("#prefer-latest-year").type === "checkbox" && $("#prefer-latest-year").closest(".settings"), "the shared field explains both input types and keeps the latest-year preference with match settings");
-ok(await until(() => /Free AI lists left today: \d+ of \d+/.test($("#budget-note").textContent)), "host sees the free-AI budget note: " + $("#budget-note").textContent.slice(0, 60));
+ok(await until(() => /10,000-neuron daily allowance/.test($("#budget-note").textContent)), "host sees the Cloudflare neuron allowance note: " + $("#budget-note").textContent.slice(0, 100));
 ok($$(".seg").length === 2 && $(".seg[data-diff=easy]").getAttribute("aria-checked") === "true", "difficulty defaults to Easy");
 ok($("#hints-val").textContent === "3", "hints default to 3");
 

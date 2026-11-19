@@ -11,7 +11,7 @@ set("AI_PROVIDER", "openai"); set("AI_MODEL", "mock-model");
 if (dev) {
   set("RANKED_LADDER_MIN_GAMES", 1); // so you appear on the ladder after one match
 } else {
-  set("DAILY_GENERATION_CAP", 22); set("IP_DAILY_GENERATIONS", 20); set("ROOM_GENERATIONS", 4); set("IP_ROOMS_PER_HOUR", 25);
+  set("IP_ROOMS_PER_HOUR", 25);
   set("DAILY_TURN_SECONDS", 4);
   set("RANKED_JOIN_SECONDS", 4); set("RANKED_FORFEIT_SECONDS", 3); set("RANKED_WIDEN_PER_SEC", 400); set("RANKED_LADDER_MIN_GAMES", 1);
 }

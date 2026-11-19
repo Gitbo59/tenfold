@@ -75,7 +75,6 @@
   }
   let selectedClassic = null;
   let classicsKey = "";
-  let budgetAt = 0;
   let showSource = false; // per game: opening it is announced to the room, so it is never remembered
   let reportCtx = null;
   const animated = new Set();
@@ -253,7 +252,7 @@
       if (m.t === "state") onState(m);
       else if (m.t === "you") pid = m.id;
       else if (m.t === "toast") {
-        if (m.kind === "error") budgetAt = 0;
+
         toast(m.msg, m.kind);
       }
     };
@@ -411,19 +410,6 @@
       .join("");
   }
 
-  async function refreshBudget() {
-    if (Date.now() - budgetAt < 20000) return;
-    budgetAt = Date.now();
-    try {
-      const res = await fetch("/api/budget");
-      const b = await res.json();
-      $("#budget-note").textContent =
-        b.remaining > 0
-          ? `Free AI lists left today: ${b.remaining} of ${b.cap}. Lists someone has already played, and the built-in lists, don't use any.`
-          : "Today's free AI allowance is used up. Built-in lists and lists that have been played before still work.";
-    } catch { /* leave the note as it was */ }
-  }
-
   function renderLobby(s, me) {
     const isHost = s.hostId === pid;
     $("#room-code").innerHTML = [...(code || "")].map((c) => `<span>${esc(c)}</span>`).join("");
@@ -488,7 +474,8 @@
     $("#wait-note").hidden = isHost;
     renderClassics(s.classics);
     $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
-    if (isHost) refreshBudget();
+    $("#budget-note").textContent =
+      "With Workers AI, Cloudflare's free 10,000-neuron daily allowance is the limit. Other AI providers may have separate limits. Saved and built-in lists don't use AI.";
   }
 
   function renderSource(s, finished) {

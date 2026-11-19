@@ -27,7 +27,7 @@ start() { # port inspector-port [extra wrangler args]
 run() { echo; echo "== $1"; shift; "$@" || FAILED=1; }
 
 start 8787 9229; run "Game rules (turns, lives, timers, scoring)" node test/game.test.mjs; stop_all
-start 8787 9229; run "Features (hints, reports, difficulty, cache, budget caps)" node test/features.test.mjs; stop_all
+start 8787 9229; run "Features (hints, reports, difficulty, cache, AI allowance)" node test/features.test.mjs; stop_all
 start 8787 9229; run "Daily challenge (accounts, sign-in, scoring, fair-play checks)" node test/daily.test.mjs; stop_all
 start 8787 9229; run "Ranked 1v1 (queue, ratings, forfeits, safeguards)" node test/ranked.test.mjs; stop_all
 start 8787 9229; run "Ranked friend game invitations" node test/friend-invites.test.mjs; stop_all

@@ -3,7 +3,7 @@ import type { Quota } from "./quota";
 
 export interface Env {
   ROOM: DurableObjectNamespace;
-  /** One global instance: daily AI budget, per-IP limits, list cache and reports. */
+  /** One global instance: AI request telemetry, room-creation limits, list cache and reports. */
   QUOTA: DurableObjectNamespace<Quota>;
   /** Accounts, daily challenge lists, attempts and leaderboards. */
   ARENA: DurableObjectNamespace<Arena>;
@@ -21,10 +21,7 @@ export interface Env {
   /** Secret for AI_PROVIDER=anthropic. */
   ANTHROPIC_API_KEY?: string;
 
-  // Cost protection (all optional; see wrangler.jsonc)
-  DAILY_GENERATION_CAP?: string | number;
-  IP_DAILY_GENERATIONS?: string | number;
-  ROOM_GENERATIONS?: string | number;
+  // Room creation protection (optional; see wrangler.jsonc)
   IP_ROOMS_PER_HOUR?: string | number;
   IDLE_MINUTES?: string | number;
   /** How often an occupied room checks for idleness (default 120). */

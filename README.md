@@ -2,7 +2,7 @@
 
 A multiplayer top-ten guessing game for Cloudflare. Pick any topic, an AI builds the ranked top ten, then players take turns guessing. Every miss costs a life.
 
-Built as a single **Cloudflare Worker with static assets**, one **Durable Object per game room** (live play over WebSockets) and one small global Durable Object that enforces the free-tier budget. **Workers AI** builds the lists by default, so there is no API key and nothing to pay for. No build step, no framework.
+Built as a single **Cloudflare Worker with static assets**, one **Durable Object per game room** (live play over WebSockets) and one small global Durable Object for AI request telemetry, room-creation limits, caching and reports. **Workers AI** builds the lists by default, so there is no API key and nothing to pay for on the Workers Free plan. No build step, no framework.
 
 ## Run it locally
 
@@ -39,7 +39,7 @@ npm run deploy
 
 That's it: the AI is a binding, so there are no secrets to set. You get a `*.workers.dev` URL; add a custom domain under Workers & Pages > your Worker > Settings > Domains & Routes. To deploy from Git instead, connect the repo under Workers & Pages > Create > Import a repository and keep the defaults.
 
-Wrangler Preview deployments use the separate `previews` settings in `wrangler.jsonc`; their Durable Objects are isolated and their AI-generation caps are lower than production. In Preview only, the app automatically signs you in as **Preview Player** and seeds a demo Ranked record, match history, friends and requests, plus daily leaderboard entries from clearly named demo accounts. The fixture data is created once per Preview account; today's demo leaderboard does not consume Preview Player's daily attempt. This is a shared dummy account for that Preview environment; don't use real personal data there. Preview deployments do not inherit production secrets, and OAuth providers are not enabled unless you configure their secrets in the Worker's **Previews Base**.
+Wrangler Preview deployments use the separate `previews` settings in `wrangler.jsonc`; their Durable Objects are isolated from production. In Preview only, the app automatically signs you in as **Preview Player** and seeds a demo Ranked record, match history, friends and requests, plus daily leaderboard entries from clearly named demo accounts. The fixture data is created once per Preview account; today's demo leaderboard does not consume Preview Player's daily attempt. This is a shared dummy account for that Preview environment; don't use real personal data there. Preview deployments do not inherit production secrets, and OAuth providers are not enabled unless you configure their secrets in the Worker's **Previews Base**.
 
 > Why not Pages? Pages Functions can't host Durable Objects, which are what make live rooms simple. A Worker with static assets does everything Pages does.
 
@@ -160,7 +160,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Origin: https://YOUR-SITE" -d
 
 None of this stops someone who looks answers up and types them naturally. It makes lazy cheating (pasting, scripts, tab-hopping) visible, and holds suspicious results until a person looks. Keep prizes modest, and verify any winner before paying out (see the rules page).
 
-Free-tier note: building the daily list is reserved separately (up to 6 AI requests a day, even if players have used up the public allowance), so the worst case is about 36 requests, roughly 9,700 neurons, still under the 10,000 daily free allowance.
+AI list generation has no per-IP, per-room, or application-side daily request cap. On the Workers Free plan, Cloudflare's 10,000-neuron daily allowance is the limit: once it is used, new AI requests fail until 00:00 UTC. Saved lists and built-in lists remain available. Keep the account on the Workers Free plan to avoid charges; on a Paid plan, use above the free allocation can be billed.
 
 ## Ranked 1v1
 
@@ -211,17 +211,17 @@ Deleting an account removes its username, rating, matches, daily results, linked
 
 **The one rule: keep the account on the Workers Free plan.** On Free there is no billing at all. When a daily limit is reached, calls simply fail until 00:00 UTC. If you upgrade to Workers Paid, or use paid AI providers, things *can* cost money (Workers AI beyond the free 10,000 neurons/day is $0.011 per 1,000).
 
-| Free limit (per day) | How Tenfold stays under it |
+| Free limit | How Tenfold uses it |
 | --- | --- |
-| Workers AI: 10,000 neurons | Default model `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Output is capped at 1,200 tokens, so one request costs at most about 270 neurons (typically about 180). A global cap of **30 requests/day** keeps the worst case near 8,000, leaving room for testing. Every model call is counted, including retries. |
-| Repeat topics | Generated lists are cached for 30 days by topic and difficulty. A cache hit costs **zero** neurons. A room replaying its own topic gets a fresh list when budget allows, otherwise the saved one. |
-| Individual abuse | 4 new AI lists per connection per day, 5 per room, 10 rooms per connection per hour. Connections are identified by a salted hash, never a stored IP. |
-| When the allowance is gone | Six **built-in lists** need no AI and always work, and cached topics still start. The lobby shows how many AI lists are left. |
+| Workers AI: 10,000 neurons | Default model `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Output is capped at 1,200 tokens. Cloudflare enforces its daily neuron allowance; every model call, including retries, uses that allowance. |
+| Repeat topics | Generated lists are cached for 30 days by topic and difficulty. A cache hit costs **zero** neurons. A room replaying its own topic gets a fresh list; otherwise the saved one. |
+| Room creation | 10 rooms per connection per hour. Connections are identified by a salted hash, never a stored IP. AI list generation has no per-IP, per-room, or app-side daily request cap. |
+| When the allowance is gone | Six **built-in lists** need no AI and always work, and cached topics still start. The lobby explains that Cloudflare enforces its neuron allowance. |
 | Durable Objects: 13,000 GB-s duration | Open WebSockets keep a room awake. Rooms with **no activity for 15 minutes** have their sockets closed (a quiet player can rejoin with one tap, nothing is lost). 13,000 GB-s is roughly 29 hours of occupied rooms a day. |
 | Daily challenge database writes | Each finished attempt costs roughly 60 database row writes against the 100,000-a-day free limit, so on the order of a thousand players a day (a rough estimate). Past that, the daily challenge pauses until midnight UTC and nothing is billed. |
 | Durable Objects: 100,000 requests, 100,000 row writes | WebSocket messages count 20:1, and a game uses a few hundred writes, so this comfortably covers hundreds of games a day (my estimate). |
 
-All of the numbers above are variables in `wrangler.jsonc`. If you change the model, check its neuron price on Cloudflare's Workers AI pricing page and adjust `DAILY_GENERATION_CAP` so that `cap x (about 270 neurons)` stays under 10,000. Some models (DeepSeek V4, Kimi, GLM 5.2 at the time of writing) need a paid plan: don't use those. The model must also support JSON mode.
+Some models (DeepSeek V4, Kimi, GLM 5.2 at the time of writing) need a paid plan: don't use those. The model must also support JSON mode.
 
 ### Watching it
 
@@ -245,7 +245,7 @@ Set `AI_PROVIDER` in `wrangler.jsonc`:
 | `openai` (any OpenAI-compatible API such as Groq, GitHub Models, OpenRouter, Mistral) | `AI_BASE_URL`, `AI_MODEL`, and the secret `AI_API_KEY` |
 | `anthropic` | secret `ANTHROPIC_API_KEY`, `AI_MODEL` optional (default `claude-sonnet-5-5`) |
 
-The caps above still apply, but they count requests, not money, so set a spend limit with that provider.
+The Cloudflare neuron allowance applies only to Workers AI. Other providers may bill independently; set spend limits with those providers.
 
 ## Tests
 
@@ -253,7 +253,7 @@ The caps above still apply, but they count requests, not money, so set a spend l
 npm test
 ```
 
-Starts a local copy of the app with a fake AI server (no login, no spend) and runs: game rules, the new features (hints, reports, difficulty, cache, budget caps), the daily challenge (sign-in handshake, scoring, the clock, fair-play holds, leaderboards, deletion), ranked 1v1 (queue, rating-gap matching, upset vs expected rating changes, forfeits, no-shows, safeguards), the rating maths, simulated-browser passes for each mode, the idle disconnect, answer matching, and the AI module (including the Workers AI response formats). The real Workers AI binding can't run offline, so it is covered by a stand-in; do one real round after deploying.
+Starts a local copy of the app with a fake AI server (no login, no spend) and runs: game rules, the new features (hints, reports, difficulty, cache, AI allowance behavior), the daily challenge (sign-in handshake, scoring, the clock, fair-play holds, leaderboards, deletion), ranked 1v1 (queue, rating-gap matching, upset vs expected rating changes, forfeits, no-shows, safeguards), the rating maths, simulated-browser passes for each mode, the idle disconnect, answer matching, and the AI module (including the Workers AI response formats). The real Workers AI binding can't run offline, so it is covered by a stand-in; do one real round after deploying.
 
 ## Project layout
 
@@ -261,7 +261,7 @@ Starts a local copy of the app with a fake AI server (no login, no spend) and ru
 public/            Static front end (index.html, style.css, app.js, daily.js, ranked.js, profile.js, rules.html)
 src/index.ts       Worker: routes, per-connection hashing, room-creation limit, admin
 src/room.ts        Durable Object per room: lobby, turns, timers, hints, reports, scoring
-src/quota.ts       Global Durable Object: AI budget, limits, list cache, report log
+src/quota.ts       Global Durable Object: AI request telemetry, room limits, list cache, report log
 src/arena.ts       Global Durable Object: accounts, daily list, timed attempts, leaderboards, review
 src/auth.ts        Sign in with Google/GitHub/Discord (OAuth + PKCE), cookies, hashed IDs
 src/anticheat.ts   The quiet fair-play rules

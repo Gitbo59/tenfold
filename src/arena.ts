@@ -444,10 +444,7 @@ export class Arena extends DurableObject<Env> {
   private systemHooks() {
     const quota = this.env.QUOTA.get(this.env.QUOTA.idFromName("global"));
     return {
-      reserve: async () => {
-        const r = await quota.reserveSystem();
-        if (!r.ok) throw new AiError("Scheduled lists couldn't be built today.", "system cap", { budget: true });
-      },
+      reserve: () => quota.reserveSystem(),
       refund: () => quota.refundSystem(),
     };
   }

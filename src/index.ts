@@ -298,11 +298,6 @@ export default {
       return json({ exists: res.status === 200 }, res.status === 200 ? 200 : 404);
     }
 
-    // How many free AI lists are left today?
-    if (url.pathname === "/api/budget" && request.method === "GET") {
-      return json(await quotaStub(env).budget());
-    }
-
     // Owner-only: usage and the report log. Disabled unless ADMIN_TOKEN is set.
     if (url.pathname.startsWith("/api/admin/")) {
       const auth = request.headers.get("Authorization");

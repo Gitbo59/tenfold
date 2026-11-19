@@ -3,7 +3,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const ok = (c, m) => { console.log(c ? "  PASS" : "  FAIL", m); if (!c) failures++; };
 const mock = async () => (await fetch("http://127.0.0.1:9999/count")).json();
-const budget = async () => (await fetch(BASE + "/api/budget")).json();
 const newRoom = async () => (await (await fetch(BASE + "/api/rooms", { method: "POST" })).json()).code;
 
 class Client {
@@ -116,7 +115,7 @@ ok((await fetch(BASE + "/api/admin/stats", { headers: { Authorization: "Bearer w
 const rep = await (await fetch(BASE + "/api/admin/reports", { headers: { Authorization: "Bearer admintok" } })).json();
 ok(rep.some((r) => r.kind === "wrong" && r.rank === 3 && r.answer === "Charlie") && rep.some((r) => r.kind === "alias" && r.answer === "Zulu"), "owner sees the stored reports (" + rep.length + ")");
 const st = await (await fetch(BASE + "/api/admin/stats", { headers: { Authorization: "Bearer admintok" } })).json();
-ok(st.dailyCap === 22 && st.aiRequestsToday >= 1, "stats show usage vs cap: " + JSON.stringify(st));
+ok(st.aiRequestsToday >= 1, "stats show AI request usage: " + JSON.stringify(st));
 
 console.log("finish, source reveal, rematch");
 let g = 0;
@@ -140,7 +139,7 @@ ok(s2.c.state.hintsLeft === 0, "hints can be turned off (0)");
 await finishByMiss(s2.c); s2.c.send({ t: "rematch" }); await s2.c.until((s) => s.phase === "lobby");
 c0 = (await mock()).calls;
 s2.c.send({ t: "start", topic: "nato ALPHABET!", playMode: "leader", extraPlayers: ["Practice player"] }); await s2.c.until((s) => s.phase === "playing");
-ok((await mock()).calls === c0 + 1, "a room replaying the same topic gets a fresh list when budget allows");
+ok((await mock()).calls === c0 + 1, "a room replaying the same topic gets a fresh list");
 const s3 = await solo("Dev");
 c0 = (await mock()).calls;
 s3.c.send({ t: "config", lives: 1 }); await s3.c.until((s) => s.config.lives === 1);
@@ -215,64 +214,36 @@ for (const answer of audienceAnswers) {
 }
 ok(audienceRoom.c.state.phase === "finished" && audienceRoom.c.state.winners.length === 0 && audienceRoom.c.state.players[0].score === 0, "the audience can collectively clear the board without a scoreboard");
 
-console.log("T4: failures are refunded; retries are counted");
-const s5 = await solo("Finn"); let b0 = await budget(); c0 = (await mock()).calls;
+console.log("T4: provider errors and retries are handled");
+const s5 = await solo("Finn"); c0 = (await mock()).calls;
 s5.c.send({ t: "config", lives: 1 }); await s5.c.until((s) => s.config.lives === 1);
 s5.c.send({ t: "start", topic: "boom goes the api" });
 ok(!!(await s5.c.toast(/didn't respond/i, 0)), "provider error shows a friendly message");
 await s5.c.until((s) => s.phase === "lobby");
-let b1 = await budget();
-ok(b1.remaining === b0.remaining && (await mock()).calls === c0 + 1, "HTTP failure is refunded (budget unchanged)");
-b0 = await budget(); c0 = (await mock()).calls;
+ok((await mock()).calls === c0 + 1, "provider failure is reported after one AI request");
+c0 = (await mock()).calls;
 s5.c.send({ t: "start", topic: "flaky list" }); await s5.c.until((s) => s.phase === "playing");
-b1 = await budget();
-ok((await mock()).calls === c0 + 2 && b1.remaining === b0.remaining - 2, "an incomplete list is retried once and both attempts count against the budget");
+ok((await mock()).calls === c0 + 2, "an incomplete list is retried once");
 await finishByMiss(s5.c); s5.c.send({ t: "rematch" }); await s5.c.until((s) => s.phase === "lobby");
 s5.c.send({ t: "start", topic: "fenced json answer" }); await s5.c.until((s) => s.phase === "playing");
 ok(true, "JSON wrapped in markdown fences is accepted");
 
-console.log("T5: per-room cap (4)");
+console.log("T5: no app-side daily, per-connection, or per-room AI list cap");
 const s6 = await solo("Gus"); s6.c.send({ t: "config", lives: 1 }); await s6.c.until((s) => s.config.lives === 1);
-for (let i = 1; i <= 4; i++) {
-  s6.c.send({ t: "start", topic: `room cap topic ${i}` }); await s6.c.until((s) => s.phase === "playing");
-  await finishByMiss(s6.c); s6.c.send({ t: "rematch" }); await s6.c.until((s) => s.phase === "lobby");
+const aiCallsBeforeT5 = (await mock()).calls;
+for (let i = 1; i <= 31; i++) {
+  s6.c.send({ t: "start", topic: `open list topic ${i}` }); await s6.c.until((s) => s.phase === "playing");
+  if (i < 31) {
+    await finishByMiss(s6.c); s6.c.send({ t: "rematch" }); await s6.c.until((s) => s.phase === "lobby");
+  }
 }
-const rk6 = s6.c.toasts.length;
-s6.c.send({ t: "start", topic: "room cap topic 5" });
-ok(!!(await s6.c.toast(/used all of its AI lists/i, rk6)), "5th new AI list in one room is refused");
-c0 = (await mock()).calls;
-s6.c.send({ t: "start", topic: "tea varieties" }); await s6.c.until((s) => s.phase === "playing");
-ok((await mock()).calls === c0, "cached and built-in lists still work after the room cap");
+ok(s6.c.state.phase === "playing" && (await mock()).calls === aiCallsBeforeT5 + 31, "31 unique AI lists start in the same room and connection");
 
-console.log("T6: per-connection daily cap (20), then free fallbacks");
-let capHit = false, rounds = 0, room = null;
-while (!capHit && rounds < 40) {
-  if (!room || rounds % 4 === 0) { room = await solo("Burn" + rounds); room.c.send({ t: "config", lives: 1 }); await room.c.until((s) => s.config.lives === 1); }
-  const mark = room.c.toasts.length;
-  room.c.send({ t: "start", topic: `burn ${rounds++} unique` });
-  const t = await room.c.toast(/connection/i, mark, 1500);
-  if (t) { capHit = true; break; }
-  await room.c.until((s) => s.phase === "playing"); await finishByMiss(room.c); room.c.send({ t: "rematch" }); await room.c.until((s) => s.phase === "lobby");
-}
-ok(capHit, `per-connection cap tripped after ${rounds - 1} further new lists`);
-const bd = await budget(); ok(bd.remaining >= 0 && bd.remaining <= bd.cap, "budget endpoint stays sane: " + JSON.stringify(bd));
-const s8 = await solo("Hana"); c0 = (await mock()).calls;
-s8.c.send({ t: "config", lives: 1 }); await s8.c.until((s) => s.config.lives === 1);
-s8.c.send({ t: "start", topic: "tea varieties" }); await s8.c.until((s) => s.phase === "playing");
-ok((await mock()).calls === c0, "with the cap reached, a cached topic still starts");
-await finishByMiss(s8.c); s8.c.send({ t: "rematch" }); await s8.c.until((s) => s.phase === "lobby");
-const rk8 = s8.c.toasts.length; s8.c.send({ t: "start", topic: "tea varieties" });
-await s8.c.until((s) => s.phase === "playing");
-ok(!!(await s8.c.toast(/replaying a saved list/i, rk8)) && (await mock()).calls === c0, "replaying a topic with no budget falls back to the saved list instead of failing");
-const rk9 = s8.c.toasts.length; await finishByMiss(s8.c); s8.c.send({ t: "rematch" }); await s8.c.until((s) => s.phase === "lobby");
-s8.c.send({ t: "start", topic: "brand new topic nobody has played" });
-ok(!!(await s8.c.toast(/connection|built-in/i, rk9)), "a brand-new topic is refused with a pointer to built-in lists");
-
-console.log("T7: room creation limit");
+console.log("T6: room creation limit");
 let limited = null;
 for (let i = 0; i < 40 && !limited; i++) { const r = await fetch(BASE + "/api/rooms", { method: "POST" }); if (r.status === 429) limited = await r.json(); }
 ok(!!limited && /lot of rooms/.test(limited.error), "room creation is rate-limited per connection");
-ok((await fetch(BASE + "/api/budget")).status === 200, "other endpoints unaffected");
+ok((await fetch(BASE + "/api/budget")).status === 404, "obsolete request-count budget endpoint is removed");
 
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL NEW-FEATURE CHECKS PASSED");
 process.exit(failures ? 1 : 0);

@@ -72,7 +72,6 @@ interface Saved {
   risk: Record<string, { w: number; flags: string[] }>;
   log: LogEntry[];
   logSeq: number;
-  genCount: number;
   lastActive: number;
 }
 
@@ -113,7 +112,6 @@ function defaultState(): Saved {
     risk: {},
     log: [],
     logSeq: 0,
-    genCount: 0,
     lastActive: Date.now(),
   };
 }
@@ -540,40 +538,16 @@ export class Room extends DurableObject<Env> {
   /** Gets a list from the cache or the AI, always through the free-allowance guards. */
   private async getList(ws: WebSocket, topic: string, difficulty: Difficulty, key: string, preferLatestYear: boolean): Promise<TopTen> {
     const q = this.quota();
-    // A room that already played this exact list gets a fresh one if the budget allows.
+    // A room that already played this exact list gets a fresh one if the provider allows it.
     if (!this.s.playedKeys.includes(key)) {
       const hit = await q.cacheGet(key);
       if (hit) return hit;
     }
 
-    const ip = this.ips.get(ws) ?? "unknown";
-    const roomCap = Math.max(0, Math.floor(num(this.env.ROOM_GENERATIONS, 5)));
     try {
       const list = await generateTopTen(this.env, topic, difficulty, {
-        reserve: async () => {
-          if (this.s.genCount >= roomCap) {
-            throw new AiError(
-              "This room has used all of its AI lists. Create a new room, or play a built-in list.",
-              "room cap",
-              { budget: true },
-            );
-          }
-          const r = await q.reserveGeneration(ip);
-          if (!r.ok) {
-            throw new AiError(
-              r.reason === "global"
-                ? "Today's free AI allowance is used up. Play a built-in list, or try again after midnight UTC."
-                : "You've reached today's limit of new AI lists from this connection. Play a built-in list, or try again tomorrow.",
-              `cap: ${r.reason}`,
-              { budget: true },
-            );
-          }
-          this.s.genCount++;
-        },
-        refund: async () => {
-          this.s.genCount = Math.max(0, this.s.genCount - 1);
-          await q.refundGeneration(ip);
-        },
+        reserve: () => q.reserveGeneration(),
+        refund: () => q.refundGeneration(),
       }, preferLatestYear);
       await q.cachePut(key, list);
       return list;
@@ -581,7 +555,7 @@ export class Room extends DurableObject<Env> {
       if (err instanceof AiError && err.opts.budget) {
         const hit = await q.cacheGet(key);
         if (hit) {
-          this.toastAll("The free AI allowance is used up, so you're replaying a saved list for this topic.");
+          this.toastAll("The AI provider's allowance is unavailable, so you're replaying a saved list for this topic.");
           return hit;
         }
       }

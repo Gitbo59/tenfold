@@ -11,9 +11,9 @@ export interface TopTen {
 }
 
 interface AiErrorOpts {
-  /** The model never produced anything, so the attempt shouldn't count against the budget. */
+  /** The model never produced anything, so the attempt shouldn't count in request telemetry. */
   noCharge?: boolean;
-  /** The failure is about allowance (daily/IP/room caps or the provider's own limit). */
+  /** The provider refused the request because its allowance or rate limit was reached. */
   budget?: boolean;
   /** The output was unusable; trying once more may help. */
   retry?: boolean;
@@ -26,7 +26,7 @@ export class AiError extends Error {
   }
 }
 
-/** Called around every model request so each one is counted against the free allowance. */
+/** Tracks attempted model requests for usage diagnostics. */
 export interface Hooks {
   reserve(): Promise<void>;
   refund(): Promise<void>;
@@ -189,7 +189,7 @@ async function callWorkersAI(env: Env, system: string, user: string): Promise<un
     console.error("Workers AI error:", msg);
     if (/neuron|allocation|quota|exceed|limit/i.test(msg)) {
       throw new AiError(
-        "Cloudflare's free AI allowance for today is used up. Play a built-in list, or try again after midnight UTC.",
+        "The AI provider's daily allowance is used up. Play a built-in list, or try again after midnight UTC.",
         msg,
         { noCharge: true, budget: true },
       );
@@ -286,7 +286,7 @@ function callProvider(env: Env, system: string, user: string): Promise<unknown> 
 
 /**
  * Builds a ranked top ten. Every model request, including a retry, is reserved through
- * `hooks` first, so the daily/IP/room caps always reflect real usage.
+ * `hooks` first, so request telemetry includes retries as well as successful calls.
  */
 export async function generateTopTen(env: Env, topic: string, difficulty: Difficulty, hooks: Hooks, preferLatestYear = false): Promise<TopTen> {
   const yearNote = preferLatestYear
@@ -297,7 +297,7 @@ export async function generateTopTen(env: Env, topic: string, difficulty: Diffic
 
   let last: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
-    await hooks.reserve(); // throws an AiError (budget) when there's no allowance left
+    await hooks.reserve();
     try {
       return parse(await callProvider(env, system, user));
     } catch (err) {

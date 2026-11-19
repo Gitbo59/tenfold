@@ -19,8 +19,8 @@ export interface ReportInput {
 }
 
 /**
- * One global instance that keeps the site inside the free tiers:
- *  - a daily cap on AI requests, plus a per-connection cap
+ * One global instance for:
+ *  - AI request usage telemetry
  *  - a cap on rooms created per connection per hour
  *  - a cache of generated lists (cache hits cost nothing)
  *  - the log of player reports
@@ -73,54 +73,29 @@ export class Quota extends DurableObject<Env> {
 
   private caps() {
     return {
-      daily: Math.max(0, Math.floor(num(this.env.DAILY_GENERATION_CAP, 30))),
-      perIp: Math.max(0, Math.floor(num(this.env.IP_DAILY_GENERATIONS, 4))),
       roomsPerHour: Math.max(1, Math.floor(num(this.env.IP_ROOMS_PER_HOUR, 10))),
     };
   }
 
-  // ---------------------------------------------------------------- AI budget
+  // --------------------------------------------------------------- AI request usage
 
-  async reserveGeneration(ip: string): Promise<{ ok: true; remaining: number } | { ok: false; reason: "global" | "ip" }> {
-    const { daily, perIp } = this.caps();
+  async reserveGeneration(): Promise<void> {
     const day = this.day();
     this.sweep(day);
-    const used = this.get(`gen:${day}`);
-    if (used >= daily) return { ok: false, reason: "global" };
-    if (this.get(`ip:${ip}:${day}`) >= perIp) return { ok: false, reason: "ip" };
     this.add(`gen:${day}`, day, 1);
-    this.add(`ip:${ip}:${day}`, day, 1);
-    return { ok: true, remaining: daily - used - 1 };
   }
 
-  async refundGeneration(ip: string): Promise<void> {
+  async refundGeneration(): Promise<void> {
     const day = this.day();
     this.add(`gen:${day}`, day, -1);
-    this.add(`ip:${ip}:${day}`, day, -1);
   }
 
-  /**
-   * The daily challenge list is scheduled work, so it isn't blocked when players have used up the
-   * public allowance. It has its own small cap and still counts towards the daily total.
-   */
-  async reserveSystem(): Promise<{ ok: boolean }> {
-    const day = this.day();
-    this.sweep(day);
-    if (this.get(`sys:${day}`) >= 6) return { ok: false };
-    this.add(`sys:${day}`, day, 1);
-    this.add(`gen:${day}`, day, 1);
-    return { ok: true };
+  async reserveSystem(): Promise<void> {
+    await this.reserveGeneration();
   }
 
   async refundSystem(): Promise<void> {
-    const day = this.day();
-    this.add(`sys:${day}`, day, -1);
-    this.add(`gen:${day}`, day, -1);
-  }
-
-  async budget(): Promise<{ remaining: number; cap: number }> {
-    const { daily } = this.caps();
-    return { remaining: Math.max(0, daily - this.get(`gen:${this.day()}`)), cap: daily };
+    await this.refundGeneration();
   }
 
   async allowRoomCreate(ip: string): Promise<boolean> {
@@ -200,12 +175,10 @@ export class Quota extends DurableObject<Env> {
 
   async stats() {
     const sql = this.ctx.storage.sql;
-    const { daily, perIp, roomsPerHour } = this.caps();
+    const { roomsPerHour } = this.caps();
     return {
       day: this.day(),
       aiRequestsToday: this.get(`gen:${this.day()}`),
-      dailyCap: daily,
-      perIpDailyCap: perIp,
       roomsPerIpPerHour: roomsPerHour,
       cachedLists: Number(sql.exec("SELECT COUNT(*) AS n FROM cache").one().n),
       storedReports: Number(sql.exec("SELECT COUNT(*) AS n FROM reports").one().n),
