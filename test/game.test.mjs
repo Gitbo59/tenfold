@@ -75,6 +75,7 @@ const aiAfterImport = (await (await fetch("http://127.0.0.1:9999/count")).json()
 ok(A.toasts.some((t) => t.kind === "error" && /HTTPS/.test(t.msg)) && aiAfterImport === aiBeforeImport, "an invalid list URL surfaces an error without falling back to AI");
 A.send({ t: "start", topic: "NATO alphabet" });
 await A.until((s) => s.phase === "playing");
+ok(A.state.listDifficulty === null, "a typed AI topic does not carry a suggested-list difficulty");
 ok(A.state.answers.length === 10 && A.state.answers.every((a) => a.answer === undefined), "answers are hidden from clients while playing");
 ok(!JSON.stringify(A.state).includes("Charlie"), "no answer text leaks in state payload");
 ok(A.state.deadline && A.state.turnMs === 6000, "turn clock running (6s)");

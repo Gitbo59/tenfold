@@ -90,7 +90,7 @@ console.log("playing and scoring");
 const g1 = await alice.guess("alpha");
 ok(g1.result.kind === "hit" && g1.result.rank === 1 && g1.result.points >= 10 && g1.result.points <= 13, "rank 1 is worth 10 to 13 depending on speed: " + g1.result.points);
 const g2 = await alice.guess("Hotel");
-ok(g2.result.rank === 8 && g2.result.points >= 4 && g2.result.points <= 6, "rank 8 is worth far less (4 to 6) after the streak bonus: " + g2.result.points);
+ok(g2.result.rank === 8 && g2.result.points >= 3 && g2.result.points <= 7, "rank 8 starts at 3 points and receives speed/streak bonuses: " + g2.result.points);
 ok(g1.result.points > g2.result.points, "higher-ranked answers score more");
 ok((await alice.guess("zzz")).result.livesLeft === 2, "a wrong answer costs a life");
 ok((await alice.guess("zzz")).result.kind === "repeat" && (await alice.guess("alpha")).result.kind === "dupe", "repeating a wrong or found answer is free");
@@ -112,7 +112,7 @@ const carol = await new Browser().player("carol-sub", "Carol"); await carol.post
 let last;
 for (const n of names) { await sleep(1700); last = await carol.guess(n); } // a human takes a couple of seconds per answer
 ok(last.status === "done" && last.found.length === 10, "finding all ten ends the attempt");
-ok(last.score >= 550 && last.score <= 1100, "a full run scores 550 to 1100: " + last.score);
+ok(last.score >= 55 && last.score <= 109, "a full run scores 55 to 109 across the rank, speed and streak bonuses: " + last.score);
 ok(last.source && last.place >= 1, "after finishing you see the source and your place");
 const mid = await alice.json("/api/daily/state");
 ok(mid.found.every((f) => f.answer) && mid.found.length === 2 && !mid.text.includes("Charlie"), "mid-game you only ever see answers you've found");

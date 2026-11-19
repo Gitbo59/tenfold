@@ -562,9 +562,9 @@
     if (leaderControlled && !finished && cur) turn.textContent = `Enter a guess for ${cur.name}`;
     if (s.phase === "playing" && !s.deadline && s.config.timerEnabled && cur) turn.textContent += " (paused until players reconnect)";
 
-    if (isMyTurn && lastTurnPid !== s.turnPid) {
+    const newTurn = isMyTurn && lastTurnPid !== s.turnPid;
+    if (newTurn) {
       navigator.vibrate?.(60);
-      $("#guess").focus({ preventScroll: true });
       resetSignals();
     }
     lastTurnPid = s.turnPid;
@@ -640,6 +640,7 @@
     $("#guess-form").dataset.state = canGuess ? "mine" : "wait";
     input.placeholder = presented && !finished ? "Take a guess" : leaderControlled && !finished ? `Guess for ${cur ? cur.name : "the current player"}` : finished ? "Round finished" : !me ? "You're watching this round" : canGuess ? "Type an answer" : cur ? `Waiting for ${cur.name}…` : "Waiting…";
     $("#guess-form").hidden = finished;
+    if (newTurn && canGuess) input.focus({ preventScroll: true });
 
     // Results
     $("#results").hidden = !finished;

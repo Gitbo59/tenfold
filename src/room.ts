@@ -682,7 +682,7 @@ export class Room extends DurableObject<Env> {
         const difficulty: Difficulty = msg.difficulty === "hard" ? "hard" : "easy";
         const preferLatestYear = this.s.config.preferLatestYear;
         key = cacheKey(topic, difficulty, preferLatestYear);
-        listDifficulty = difficulty;
+        listDifficulty = msg.difficulty === "hard" || msg.difficulty === "easy" ? difficulty : null;
         list = await this.getList(ws, topic, difficulty, key, preferLatestYear);
       }
       if (this.s.phase !== "generating") return;

@@ -26,6 +26,7 @@ async function page(hash, browser) {
   const vc = new VirtualConsole(); vc.on("jsdomError", (e) => errors.push(e.message)); vc.on("error", (e) => errors.push(String(e)));
   const dom = new JSDOM(html, { url: BASE + "/" + hash, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
   const w = dom.window; const sent = [];
+  w.HTMLMediaElement.prototype.play = () => Promise.resolve();
   w.fetch = (u, o = {}) => { const headers = { ...(o.headers || {}) }; if (browser) headers.cookie = browser.cookie(); if (o.method === "POST") headers.Origin = BASE; return fetch(new URL(u, BASE), { ...o, headers, redirect: "manual" }); };
   w.WebSocket = function (url) { const ws = new NodeWS(url, { headers: { Origin: BASE, ...(browser ? { Cookie: browser.cookie() } : {}) } }); const orig = ws.send.bind(ws); ws.send = (d) => { sent.push(JSON.parse(d)); return orig(d); }; return ws; };
   w.WebSocket.OPEN = 1;

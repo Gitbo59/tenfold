@@ -23,12 +23,17 @@ async function page(hash, cookie) {
   const vc = new VirtualConsole(); vc.on("jsdomError", (e) => errors.push(e.message)); vc.on("error", (e) => errors.push(String(e)));
   const dom = new JSDOM(html, { url: BASE + "/" + hash, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
   const w = dom.window; const reqs = [];
-  let audioStarts = 0;
+  let audioPlays = 0;
+  w.Audio = class {
+    currentTime = 0;
+    preload = "auto";
+    play() { audioPlays++; return Promise.resolve(); }
+  };
   w.AudioContext = class {
     currentTime = 0;
     state = "running";
     destination = {};
-    createOscillator() { return { frequency: { value: 0 }, connect() {}, start() { audioStarts++; }, stop() {} }; }
+    createOscillator() { return { frequency: { value: 0 }, connect() {}, start() {}, stop() {} }; }
     createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
   };
   w.fetch = (u, o = {}) => {
@@ -43,7 +48,7 @@ async function page(hash, cookie) {
   const click = (el) => el.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
   const submit = (form) => form.dispatchEvent(new w.Event("submit", { bubbles: true, cancelable: true }));
   const type = (el, text) => { for (const ch of text) el.dispatchEvent(new w.KeyboardEvent("keydown", { key: ch, bubbles: true })); el.value = text; el.dispatchEvent(new w.Event("input", { bubbles: true })); };
-  return { w, $, $$, until, click, submit, type, reqs, audioStarts: () => audioStarts };
+  return { w, $, $$, until, click, submit, type, reqs, audioPlays: () => audioPlays };
 }
 
 console.log("home page and the For fun / Ranked switch");
@@ -91,7 +96,7 @@ ok(Number(p.$("#daily-secs").textContent) >= 1 && Number(p.$("#daily-secs").text
 
 p.type(p.$("#daily-guess"), "alpha"); p.submit(p.$("#daily-guess-form"));
 ok(await p.until(() => p.$$("#daily-list .plate.found").length === 1), "a correct answer reveals its plate");
-ok(await p.until(() => p.audioStarts() === 2), "a correct daily answer plays the synthesized ding");
+ok(await p.until(() => p.audioPlays() === 1), "a correct daily answer plays one ding");
 ok(/Alpha/.test(p.$("#daily-list .found").textContent) && /\+\d+/.test(p.$("#daily-list .found .pts").textContent) && Number(p.$("#daily-stats .big").textContent) > 0, "plate shows the answer and points; score updates");
 const g1 = p.reqs.filter((r) => r.url.includes("/daily/guess")).at(-1).body;
 ok(g1.text === "alpha" && g1.sig.keys === 5 && g1.sig.paste === false && g1.sig.typeMs >= 0, "typing is reported as 5 key presses, not pasted");

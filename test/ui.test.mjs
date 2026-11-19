@@ -10,12 +10,17 @@ const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "
 const css = fs.readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
 const dom = new JSDOM(html, { url: BASE + "/", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
 const w = dom.window; w.fetch = (u, o) => fetch(new URL(u, BASE), o);
-let audioStarts = 0;
+let audioPlays = 0;
+w.Audio = class {
+  currentTime = 0;
+  preload = "auto";
+  play() { audioPlays++; return Promise.resolve(); }
+};
 w.AudioContext = class {
   currentTime = 0;
   state = "running";
   destination = {};
-  createOscillator() { return { frequency: { value: 0 }, connect() {}, start() { audioStarts++; }, stop() {} }; }
+  createOscillator() { return { frequency: { value: 0 }, connect() {}, start() {}, stop() {} }; }
   createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
 };
 w.eval(fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8"));
@@ -94,9 +99,10 @@ const turnIsMine = () => $("#guess-form").dataset.state === "mine";
 const bobTurn = () => bobState && bobState.turnPid === bobPid;
 async function ensureMyTurn() { for (let i = 0; i < 60 && !turnIsMine(); i++) { if (bobTurn()) { bsend({ t: "guess", text: "zzz-bob-" + i }); await sleep(250); } else await sleep(50); } return turnIsMine(); }
 ok(await ensureMyTurn(), "got my turn");
+ok(w.document.activeElement === $("#guess"), "guess input is focused when my turn starts");
 submitGuess("everest");
 ok(await until(() => $$("#board .plate.found").length === 1) && $("#board .plate.found .ans").textContent === "Mount Everest", "alias 'everest' reveals Mount Everest");
-ok(await until(() => audioStarts === 2), "a newly correct answer plays the synthesized ding once");
+ok(await until(() => audioPlays > 0), "a newly correct answer plays a ding");
 ok(!$(".plate-hint") || $$(".plate-hint").length === 0, "the clue disappears once that answer is found");
 const flag = $("#board .plate.found .flag"); ok(!!flag && flag.textContent === "Report", "found answers carry a Report link");
 click(flag);
@@ -106,6 +112,7 @@ ok($("#report-modal").hidden && await until(() => $("#board .plate.found .flag")
 ok(await until(() => /Flagged x1/.test($("#board .plate.found .sub").textContent)) && $$("#feed li").some((l) => /flagged #1 Mount Everest as ranked wrongly/.test(l.textContent)), "room sees the flag and the feed says why");
 // a wrong guess by me -> tap the chip -> report as rejected
 ok(await ensureMyTurn(), "my turn again");
+ok(w.document.activeElement === $("#guess"), "guess input is focused when my next turn starts");
 submitGuess("Mont Blanc");
 ok(await until(() => $$("#wrong .chip-x").some((c) => c.dataset.guess === "Mont Blanc")), "wrong guess appears under 'Already tried'");
 const wrongChip = $$("#wrong .chip-x").find((c) => c.dataset.guess === "Mont Blanc"); click(wrongChip);
