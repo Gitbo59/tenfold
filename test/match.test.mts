@@ -18,6 +18,11 @@ ok(kind("children", [A("Child")]) === "hit:0:exact", "common irregular plurals m
 ok(kind("knives", [A("Knife"), A("Knif")]) === "miss", "ambiguous singular forms never guess between two answers");
 ok(kind("k2", peaks) === "hit:1:exact", "short answers need to be exact");
 ok(kind("k3", peaks) === "miss", "...and don't accept near-misses");
+ok(kind("PlayStation 3", [A("PlayStation 2")]) === "miss", "a different trailing digit is not treated as a typo");
+ok(kind("World War II", [A("World War I")]) === "miss", "a different trailing Roman numeral is not treated as a typo");
+ok(kind("World War 1", [A("World War I")]) === "hit:0:exact", "Arabic and Roman numeral suffixes match exactly");
+ok(kind("World War 2", [A("World War II")]) === "hit:0:exact", "two is equivalent to the Roman numeral II");
+ok(kind("Playstaton 2", [A("PlayStation 2")]) === "hit:0:close", "text typos remain acceptable when the number suffix agrees");
 
 console.log("partial names");
 ok(kind("Everest", peaks) === "hit:0:close", "'Everest' counts for 'Mount Everest' with no alias needed");

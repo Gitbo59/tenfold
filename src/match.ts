@@ -33,6 +33,27 @@ export function normalize(input: string): string {
     .replace(/^(the|a|an) /, "");
 }
 
+function canonicalizeNumberSuffix(input: string): string {
+  const roman = input.match(/^(.*\s)([ivxlcdm]+)$/);
+  if (!roman) return input;
+  const numeral = roman[2];
+  if (!/^(?=.)m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$/.test(numeral)) return input;
+
+  const values: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+  let value = 0;
+  for (let i = 0; i < numeral.length; i++) {
+    const current = values[numeral[i]];
+    const next = values[numeral[i + 1]] ?? 0;
+    value += current < next ? -current : current;
+  }
+  return `${roman[1]}${value}`;
+}
+
+function numberSuffix(input: string): string | null {
+  const match = input.match(/(\d+)$/);
+  return match ? match[1].replace(/^0+(?=\d)/, "") : null;
+}
+
 /** Levenshtein distance with an early exit once it exceeds `max`. */
 export function levenshtein(a: string, b: string, max: number): number {
   if (a === b) return 0;
@@ -111,7 +132,7 @@ function tokenEq(a: string, b: string): boolean {
  *     meaningful words ("Chad Kenya") never count, so players can't hedge.
  */
 export function matchGuess(guessRaw: string, answers: Answer[]): Match {
-  const g = normalize(guessRaw);
+  const g = canonicalizeNumberSuffix(normalize(guessRaw));
   if (!g) return { kind: "miss" };
   const singularGuesses = new Set(singularFormsFor(g));
 
@@ -123,12 +144,15 @@ export function matchGuess(guessRaw: string, answers: Answer[]): Match {
   const pluralCandidates = new Set<number>();
   answers.forEach((a, index) => {
     for (const form of [a.answer, ...a.aliases]) {
-      const f = normalize(form);
+      const f = canonicalizeNumberSuffix(normalize(form));
       if (!f) continue;
       if (singularFormsFor(f).some((form) => singularGuesses.has(form))) {
         pluralCandidates.add(index);
         continue;
       }
+      const guessNumber = numberSuffix(g);
+      const formNumber = numberSuffix(f);
+      if ((guessNumber !== null || formNumber !== null) && guessNumber !== formNumber) continue;
       const allowed = allowedDistance(f.length);
       const d = levenshtein(g, f, allowed);
       if (d > allowed) continue;
@@ -162,7 +186,7 @@ export function matchGuess(guessRaw: string, answers: Answer[]): Match {
   const candidates = new Set<number>();
   answers.forEach((a, index) => {
     for (const form of [a.answer, ...a.aliases]) {
-      const as = sig(normalize(form));
+      const as = sig(canonicalizeNumberSuffix(normalize(form)));
       if (!as.length) continue;
       const forward = gs.every((t) => as.some((u) => tokenEq(t, u)));
       const reverse =
