@@ -302,10 +302,10 @@ input:disabled { opacity: 0.6; }
 .local-score-players:empty { display: none; }
 .presentation-note { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--stage-deep); text-align: center; font-weight: 700; }
 .suggestion-style { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
-.suggestion-picker { display: inline-flex; align-items: center; width: max-content; max-width: 100%; padding: 3px; border: 2px solid var(--line); border-radius: 999px; background: var(--stage-deep); }
-.suggestion-picker .btn { border: 0; white-space: nowrap; }
+.suggestion-picker { display: flex; align-items: center; width: 100%; padding: 3px; border: 2px solid var(--line); border-radius: 999px; background: transparent; }
+.suggestion-picker .btn { flex: 1; border: 0; background: transparent; white-space: nowrap; }
 .suggestion-picker .btn:hover:not(:disabled) { border-color: transparent; background: rgba(255, 255, 255, 0.08); }
-.suggestion-picker .segmented { margin-left: 4px; padding: 0 0 0 4px; border: 0; border-left: 1px solid var(--line); background: transparent; }
+.suggestion-picker .segmented { flex: none; margin-left: 4px; padding: 0 0 0 4px; border: 0; border-left: 1px solid var(--line); background: transparent; }
 .suggestion-picker .seg { padding: 7px 12px; }
 .custom-list-toggle { margin-top: 12px; }
 .custom-answers { display: grid; gap: 10px; min-width: 0; margin: 14px 0 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
