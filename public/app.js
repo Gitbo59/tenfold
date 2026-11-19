@@ -475,7 +475,7 @@
     renderClassics(s.classics);
     $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     $("#budget-note").textContent =
-      "With Workers AI, Cloudflare's free 10,000-neuron daily allowance is the limit. Other AI providers may have separate limits. Saved and built-in lists don't use AI.";
+      "The site is currently limited to daily usage limits. Manually entered, saved and built-in lists don't contribute to the usage limit.";
   }
 
   function renderSource(s, finished) {
