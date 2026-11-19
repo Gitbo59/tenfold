@@ -37,10 +37,10 @@ const code = $$("#room-code span").map((s) => s.textContent).join("");
 
 console.log("lobby controls");
 ok($("#score-setup-modal").hidden, "player setup stays closed until Start game is pressed");
-ok($$("#classics .chip").length === 6, "six built-in lists offered");
+ok(!$("#classics-wrap") && !!$("#btn-surprise"), "the built-in list section is removed and Surprise me remains available");
 ok(!$("#list-url") && $("#topic").type === "text" && $("#topic").maxLength === 2048 && /webpage link/i.test($("#topic-label").textContent), "one text field accepts topics and webpage links");
 ok($("#topic-help").textContent.includes("imports its ranked list") && $("#prefer-latest-year").type === "checkbox" && $("#prefer-latest-year").closest(".settings"), "the shared field explains both input types and keeps the latest-year preference with match settings");
-ok(await until(() => /10,000-neuron daily allowance/.test($("#budget-note").textContent)), "host sees the Cloudflare neuron allowance note: " + $("#budget-note").textContent.slice(0, 100));
+ok(await until(() => /daily usage limits/.test($("#budget-note").textContent)), "host sees the daily usage note: " + $("#budget-note").textContent.slice(0, 100));
 ok($$(".seg").length === 2 && $(".seg[data-diff=easy]").getAttribute("aria-checked") === "true", "difficulty defaults to Easy");
 ok($("#hints-val").textContent === "3", "hints default to 3");
 
@@ -69,8 +69,9 @@ $("#timer-on").checked = false; $("#timer-on").dispatchEvent(new w.Event("change
 ok(await until(() => bobState.config.timerEnabled === false), "time limit switched off (keeps the test deterministic)");
 
 console.log("built-in list round");
-const chip = $$("#classics .chip").find((c) => c.dataset.id === "mountains"); click(chip);
-ok($("#topic").value === "Highest mountains in the world" && chip.getAttribute("aria-pressed") === "true", "picking a built-in list fills the topic and marks it selected");
+w.Math.random = () => 20 / 26;
+click($("#btn-surprise"));
+ok($("#topic").value === "Highest mountains in the world", "Surprise me can select a built-in list");
 click($("#btn-start"));
 ok($("#score-setup-modal").hidden, "multiple lobby devices skip player setup when Start game is pressed");
 ok(await until(() => visible("#screen-game")), "the multiplayer game starts directly from a built-in list (no AI)");
@@ -132,13 +133,13 @@ ok($("#btn-source").hidden && !$("#source-line").hidden, "after the game the sou
 ok($$("#board .plate").every((p) => p.classList.contains("found") || p.classList.contains("missed")) && $$("#board .flag").length === 10, "every answer is revealed and reportable");
 ok(visible("#results") && !$("#btn-rematch").hidden, "host can play again");
 click($("#btn-rematch"));
-ok(await until(() => visible("#screen-lobby")) && $$("#classics .chip").length === 6, "back in the lobby with built-in lists offered again");
+ok(await until(() => visible("#screen-lobby")) && !$("#classics-wrap") && !!$("#btn-surprise"), "back in the lobby with built-ins available only through Surprise me");
 
 console.log("AI round with Hard difficulty");
 bobWs.close();
 ok(await until(() => $("#lobby-players .tag-away")), "the lobby updates when the other device disconnects");
 click($("#btn-custom-list"));
-ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer]").length === 10 && $("#topic-label").textContent === "Category / list title" && $("#topic").maxLength === 120 && $("#topic-help").hidden && $(".topic-tools").hidden && $("#classics-wrap").hidden, "custom-list mode offers ten ranked answer fields and adjusts the shared field for a title");
+ok(!$("#custom-answers").hidden && $$("#custom-answer-fields [data-manual-answer]").length === 10 && $("#topic-label").textContent === "Category / list title" && $("#topic").maxLength === 120 && $("#topic-help").hidden && $(".topic-tools").hidden, "custom-list mode offers ten ranked answer fields and adjusts the shared field for a title");
 $("#topic").value = "My custom category";
 for (const [index, input] of $$("#custom-answer-fields [data-manual-answer]").entries()) input.value = `Custom answer ${index + 1}`;
 click($("#btn-start"));

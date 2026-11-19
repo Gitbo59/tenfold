@@ -35,6 +35,7 @@
   ];
   let suggestionDifficulty = "easy";
   let selectedSuggestionDifficulty = null;
+  let surpriseClassics = [];
   let customListMode = false;
   let playMode = "automatic";
   let assignedPlayerIds = new Set();
@@ -74,7 +75,6 @@
     sound.preload = "auto";
   }
   let selectedClassic = null;
-  let classicsKey = "";
   let showSource = false; // per game: opening it is announced to the room, so it is never remembered
   let reportCtx = null;
   const animated = new Set();
@@ -223,7 +223,7 @@
       try { ws.close(1000, "leave"); } catch {}
     }
     ws = null; state = null; code = null; joinSent = false; lastTurnPid = null; lastLogId = null;
-    selectedClassic = null; classicsKey = ""; selectedSuggestionDifficulty = null;
+    selectedClassic = null; surpriseClassics = []; selectedSuggestionDifficulty = null;
     animated.clear(); myReports.clear();
     sessionStorage.removeItem("tf_room");
     history.replaceState(null, "", "/");
@@ -336,16 +336,6 @@
     $("#topic-chips").innerHTML = pick(4).map((t) => `<button class="chip" type="button">${esc(t)}</button>`).join("");
   }
 
-  function renderClassics(list) {
-    const key = JSON.stringify(list || []);
-    if (key === classicsKey) return;
-    classicsKey = key;
-    $("#classics").innerHTML = (list || [])
-      .map((c) => `<button class="chip" type="button" data-id="${esc(c.id)}" data-title="${esc(c.title)}" aria-pressed="false">${esc(c.title)}</button>`)
-      .join("");
-    $("#classics-wrap").hidden = !(list && list.length);
-  }
-
   function renderCustomAnswerFields() {
     $("#custom-answer-fields").innerHTML = Array.from({ length: 10 }, (_, index) =>
       `<label class="field"><span class="field-label">Answer #${index + 1}</span><input type="text" maxlength="80" data-manual-answer="${index + 1}" autocomplete="off"></label>`,
@@ -412,6 +402,7 @@
 
   function renderLobby(s, me) {
     const isHost = s.hostId === pid;
+    surpriseClassics = s.classics || [];
     $("#room-code").innerHTML = [...(code || "")].map((c) => `<span>${esc(c)}</span>`).join("");
     $("#player-count").textContent = `${s.players.length} of 8`;
     $("#lobby-players").innerHTML = s.players
@@ -459,21 +450,18 @@
     $("#topic").closest(".field").hidden = !isHost;
     $("#btn-custom-list").hidden = !isHost;
     $("#btn-custom-list").setAttribute("aria-pressed", String(customListMode));
-    $("#btn-custom-list").textContent = customListMode ? "Use a suggested, built-in, or imported list" : "Enter all 10 answers yourself";
+    $("#btn-custom-list").textContent = customListMode ? "Use a suggested or imported list" : "Enter all 10 answers yourself";
     $("#topic-label").textContent = customListMode ? "Category / list title" : "Enter a topic or paste a webpage link";
     $("#topic").placeholder = customListMode ? "Enter a category or list title" : "e.g. Best-selling video games or https://example.com/top-ten";
     $("#topic").maxLength = customListMode ? 120 : 2048;
     $("#topic-help").hidden = customListMode;
     $("#custom-answers").hidden = !isHost || !customListMode;
     $(".topic-tools").hidden = !isHost || customListMode;
-    $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     $("#budget-note").hidden = !isHost;
     renderPlayOptions(s, isHost);
     $("#btn-start").hidden = !isHost;
     $("#btn-start").textContent = "Start game";
     $("#wait-note").hidden = isHost;
-    renderClassics(s.classics);
-    $("#classics-wrap").hidden = !isHost || customListMode || !(s.classics && s.classics.length);
     $("#budget-note").textContent =
       "The site is currently limited to daily usage limits. Manually entered, saved and built-in lists don't contribute to the usage limit.";
   }
@@ -813,31 +801,22 @@
     if (!b) return;
     selectedClassic = null;
     selectedSuggestionDifficulty = suggestionDifficulty;
-    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     $("#topic").value = b.textContent;
     $("#topic").focus();
   });
-  $("#classics").addEventListener("click", (e) => {
-    const b = e.target.closest(".chip");
-    if (!b) return;
-    selectedClassic = b.dataset.id;
-    selectedSuggestionDifficulty = null;
-    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", String(c === b));
-    $("#topic").value = b.dataset.title;
-  });
   $("#topic").addEventListener("input", () => {
     selectedSuggestionDifficulty = null;
-    const chosen = selectedClassic && $(`#classics .chip[data-id="${selectedClassic}"]`);
-    if (!chosen || chosen.dataset.title !== $("#topic").value.trim()) {
-      selectedClassic = null;
-      for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
-    }
+    selectedClassic = null;
   });
   $("#btn-surprise").addEventListener("click", () => {
-    selectedClassic = null;
-    selectedSuggestionDifficulty = suggestionDifficulty;
-    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
-    $("#topic").value = pick(1)[0];
+    const choices = [
+      ...pool().map((title) => ({ title })),
+      ...surpriseClassics.map((classic) => ({ title: classic.title, classic: classic.id })),
+    ];
+    const choice = choices[Math.floor(Math.random() * choices.length)];
+    selectedClassic = choice.classic || null;
+    selectedSuggestionDifficulty = choice.classic ? null : suggestionDifficulty;
+    $("#topic").value = choice.title;
     renderChips();
   });
   $("#btn-custom-list").addEventListener("click", () => {
@@ -845,7 +824,6 @@
     if (customListMode && playMode === "network") playMode = "automatic";
     selectedClassic = null;
     selectedSuggestionDifficulty = null;
-    for (const c of $$("#classics .chip")) c.setAttribute("aria-pressed", "false");
     render();
   });
   for (const input of $$('input[name="play-mode"]')) {

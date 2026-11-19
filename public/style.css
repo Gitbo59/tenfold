@@ -405,8 +405,6 @@ input:disabled { opacity: 0.6; }
 .seg[aria-checked="true"] { background: var(--bulb); color: var(--stage-deep); }
 .seg:disabled { cursor: not-allowed; opacity: 0.55; }
 
-.classics { margin-top: 18px; }
-.classics .chip { border-style: dashed; }
 .chip[aria-pressed="true"] { border-color: var(--bulb); background: rgba(255, 191, 47, 0.16); }
 .budget-note { margin-top: 14px; }
 
