@@ -411,12 +411,14 @@
                 <span class="setting-name" id="diff-label">Suggested topic category</span>
                 <span class="hint">Choose easy or hard suggestions. The selected style is used for that suggestion.</span>
               </div>
-              <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
-                <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
-                <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
+              <div class="suggestion-picker">
+                <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>
+                <div class="segmented" role="radiogroup" aria-labelledby="diff-label">
+                  <button type="button" class="seg" role="radio" data-diff="easy" aria-checked="true">Easy</button>
+                  <button type="button" class="seg" role="radio" data-diff="hard" aria-checked="false">Hard</button>
+                </div>
               </div>
             </div>
-            <button id="btn-surprise" class="btn btn-small" type="button">Surprise me</button>
             <div id="topic-chips" class="chips"></div>
           </div>
           <p id="budget-note" class="hint budget-note"></p>
